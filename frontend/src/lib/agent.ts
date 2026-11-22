@@ -1,3 +1,5 @@
+import { apiFetch } from "@/lib/keys";
+
 // Client for the backend: the /api/chat SSE stream, attachments, models, stop.
 // Plus citation checking against tool results and attachments.
 
@@ -86,23 +88,23 @@ async function json<T>(res: Response): Promise<T> {
 }
 
 export async function fetchModels(): Promise<{ default: string | null; models: ModelOption[] }> {
-  return json(await fetch("/api/models"));
+  return json(await apiFetch("/api/models"));
 }
 
 export async function addLink(url: string): Promise<AttachmentCard> {
   return json(
-    await fetch("/api/links", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url }) }),
+    await apiFetch("/api/links", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url }) }),
   );
 }
 
 export async function uploadFile(file: File): Promise<AttachmentCard> {
   const body = new FormData();
   body.append("file", file);
-  return json(await fetch("/api/files", { method: "POST", body }));
+  return json(await apiFetch("/api/files", { method: "POST", body }));
 }
 
 export async function stopSession(sessionId: string): Promise<void> {
-  await fetch("/api/stop", {
+  await apiFetch("/api/stop", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ session_id: sessionId }),
@@ -119,7 +121,7 @@ export async function streamChat(opts: {
   onSession: (id: string) => void;
   onEvent: (e: TraceEvent) => void;
 }): Promise<void> {
-  const res = await fetch("/api/chat", {
+  const res = await apiFetch("/api/chat", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({

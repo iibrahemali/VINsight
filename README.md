@@ -91,6 +91,9 @@ pnpm install && pnpm dev        # http://localhost:3000
 
 Or with Docker: `docker compose up --build`.
 
+No server keys? Visitors can paste their own free keys under **API keys** in the sidebar. They're
+kept in the browser, sent with each request as a header, and never stored by the server.
+
 Command line, no UI:
 
 ```bash
