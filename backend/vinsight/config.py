@@ -31,7 +31,8 @@ class Settings(BaseSettings):
     groq_max_wait_s: float = 20.0  # wait out a per-minute rate limit up to this long, else switch model
     groq_timeout_s: float = 30.0
     groq_max_completion_tokens: int = 2048
-    groq_notetaker_model: str = "openai/gpt-oss-20b"  # separate rate-limit budget from the advisor
+    # The note-taker's models, in order; each has a separate rate-limit budget from the advisor's.
+    groq_notetaker_models: list[str] = ["openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
     groq_stt_model: str = "whisper-large-v3-turbo"
     groq_tts_model: str = "canopylabs/orpheus-v1-english"
     groq_tts_voice: str = "daniel"  # male. Orpheus voices on Groq: austin, daniel, troy (male); autumn, diana, hannah

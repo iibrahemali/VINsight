@@ -4,6 +4,7 @@ POST /api/chat streams the agent's trace as server-sent events, one TraceEvent p
 """
 
 import asyncio
+import logging
 import uuid
 from contextlib import asynccontextmanager
 
@@ -18,9 +19,11 @@ from vinsight.agent import DEFAULT_PERSONA, PERSONAS, Agent, Prefetch, ToolBox, 
 from vinsight.config import settings
 from vinsight.keys import Keys
 from vinsight.llm import MODELS, available_providers, new_conversation, provider_factories, resolve
+from vinsight.llm.base import short_reason
 from vinsight.models import BuyerProfile
 
 _DONE = object()
+log = logging.getLogger(__name__)
 
 
 class Session:
@@ -209,7 +212,8 @@ async def chat(req: ChatRequest, request: Request) -> StreamingResponse:
                             session.advisor_notes = [e.data_note for e in checked if e.avoid and e.data_note]
                             await queue.put(TraceEvent(type="profile", turn=0, output=session.profile.model_dump()))
                     except Exception as e:  # notes are a nice-to-have; never fail the turn over them
-                        await queue.put(TraceEvent(type="notice", turn=0, text=f"Couldn't update notes: {e}"))
+                        log.warning("note-taker failed: %s", e)
+                        await queue.put(TraceEvent(type="notice", turn=0, text=f"Couldn't update the car brief: the note-taker {short_reason(e)}."))
             except asyncio.CancelledError:
                 await queue.put(TraceEvent(type="error", turn=0, text="Stopped.", ok=False))
                 raise

@@ -174,3 +174,34 @@ async def test_failure_notices_are_short_and_friendly():
     router.add_user("hi")
     notice = (await drain(router))[0].text
     assert notice == "Gemini is over its free-tier limit. Switched to GPT-OSS." and "{" not in notice
+
+
+async def test_fallback_keeps_going_until_a_provider_answers():
+    router = ConversationRouter(
+        {"gpt": lambda: Scripted(fail=LLMError("429 tokens per day")),
+         "gemini": lambda: Scripted(fail=LLMError("429 quota")),
+         "qwen": lambda: Scripted([Step(texts=["hello from qwen"])])},
+        active="gpt",
+    )
+    router.add_user("hi")
+    items = await drain(router)
+    notices = [i.text for i in items if getattr(i, "kind", "") == "notice"]
+    assert len(notices) == 2 and items[-1].texts == ["hello from qwen"] and router.active == "qwen"
+
+
+async def test_rate_limited_model_is_skipped_on_the_next_turn():
+    gpt_calls = []
+
+    def gpt():
+        gpt_calls.append(1)
+        return Scripted(fail=LLMError("429 rate limit"))
+
+    router = ConversationRouter({"gpt": gpt, "qwen": lambda: Scripted([Step(texts=["a"]), Step(texts=["b"])])}, active="gpt")
+    router.add_user("hi")
+    await drain(router)
+    router.use("gpt")  # the user's picker still says gpt
+    router.add_user("again")
+    items = await drain(router)
+    # A fresh qwen instance answers; the rate-limited model is not streamed from again.
+    assert items[0].kind == "notice" and "for now" in items[0].text and items[-1].texts == ["a"]
+    assert router.active == "qwen"

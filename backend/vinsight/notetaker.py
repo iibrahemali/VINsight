@@ -52,17 +52,27 @@ def merge(profile: BuyerProfile, update: dict) -> BuyerProfile:
 async def take_notes(
     profile: BuyerProfile, user: str, advisor: str, client: groq.AsyncGroq | None = None, api_key: str | None = None
 ) -> BuyerProfile:
-    client = client or groq.AsyncGroq(api_key=api_key or settings.groq_api_key, max_retries=2, timeout=20)
+    client = client or groq.AsyncGroq(api_key=api_key or settings.groq_api_key, max_retries=0, timeout=20)
     notes = json.dumps(profile.model_dump(exclude={"source"}, exclude_defaults=True))
-    response = await client.chat.completions.create(
-        model=settings.groq_notetaker_model,
-        reasoning_effort="low",
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": PROMPT},
-            {"role": "user", "content": f"Current notes: {notes}\n\nBuyer said: {user}\n\nAdvisor said: {advisor}"},
-        ],
-    )
+    messages = [
+        {"role": "system", "content": PROMPT},
+        {"role": "user", "content": f"Current notes: {notes}\n\nBuyer said: {user}\n\nAdvisor said: {advisor}"},
+    ]
+    # Each model has its own free-tier quota: if one is over its limit, try the next.
+    response, last_error = None, None
+    for model in settings.groq_notetaker_models:
+        try:
+            response = await client.chat.completions.create(
+                model=model,
+                response_format={"type": "json_object"},
+                messages=messages,
+                **({"reasoning_effort": "low"} if model.startswith("openai/gpt-oss") else {}),
+            )
+            break
+        except (groq.RateLimitError, groq.InternalServerError, groq.APIConnectionError, groq.APITimeoutError) as e:
+            last_error = e
+    if response is None:
+        raise last_error
     try:
         update = json.loads(response.choices[0].message.content or "{}")
     except json.JSONDecodeError:
