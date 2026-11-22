@@ -1,5 +1,6 @@
 """Groq (OpenAI-compatible chat completions): gpt-oss-120b, fast and free-tier friendly."""
 
+import asyncio
 import json
 
 import groq
@@ -21,11 +22,21 @@ def _compact(value, max_str: int):
     return value
 
 
+def _retry_after(error: Exception | None) -> float | None:
+    """Seconds Groq asked us to wait, from the retry-after header."""
+    response = getattr(error, "response", None)
+    try:
+        return float(response.headers.get("retry-after")) if response is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 class GroqConversation:
     def __init__(self, client: groq.AsyncGroq | None = None, models: list[str] | None = None, api_key: str | None = None):
-        # The SDK honours retry-after on 429s, so retries wait out the free tier's per-minute budget.
+        # No SDK retries: it would wait out rate limits silently (sometimes for minutes). stream()
+        # handles them itself, telling the user when it waits and moving on when the wait is long.
         self._client = client or groq.AsyncGroq(
-            api_key=api_key or settings.groq_api_key, max_retries=settings.groq_max_retries, timeout=settings.groq_timeout_s
+            api_key=api_key or settings.groq_api_key, max_retries=0, timeout=settings.groq_timeout_s
         )
         self._models = models or settings.groq_models
         self.history: list[dict] = []
@@ -35,7 +46,16 @@ class GroqConversation:
 
     async def stream(self, system: str, tools: list[ToolSpec], effort: str | None = None):
         last_error: Exception | None = None
-        for model in self._models:
+        attempts = [(m, retry) for m in self._models for retry in (False, True)]
+        for model, retry in attempts:
+            if retry and not isinstance(last_error, groq.RateLimitError):
+                continue  # only a short rate-limit wait earns a second try on the same model
+            if retry:
+                wait = _retry_after(last_error)
+                if wait is None or wait > settings.groq_max_wait_s:
+                    continue  # a long wait: try the next model instead of hanging
+                yield Delta("notice", f"Groq's free tier is busy (per-minute limit). Retrying in {wait:.0f}s…")
+                await asyncio.sleep(wait)
             try:
                 tool_args = (
                     {
@@ -66,6 +86,9 @@ class GroqConversation:
             except (groq.RateLimitError, groq.InternalServerError, groq.APITimeoutError, groq.APIConnectionError) as e:
                 last_error = e
             except groq.APIStatusError as e:
+                if e.status_code == 413:  # request bigger than this model's per-minute budget: try the next
+                    last_error = e
+                    continue
                 raise LLMError(f"Groq rejected the request: {e.message}") from e
         else:
             raise LLMError(f"all Groq models unavailable or rate-limited ({type(last_error).__name__}: {last_error})")

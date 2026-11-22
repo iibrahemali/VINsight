@@ -22,8 +22,9 @@ def tc(index, id=None, name=None, args=None):
     return NS(index=index, id=id, function=NS(name=name, arguments=args))
 
 
-def rate_limited():
-    response = httpx.Response(429, request=httpx.Request("POST", "https://api.groq.com"))
+def rate_limited(retry_after: str | None = None):
+    headers = {"retry-after": retry_after} if retry_after else {}
+    response = httpx.Response(429, headers=headers, request=httpx.Request("POST", "https://api.groq.com"))
     return groq.RateLimitError("rate limited", response=response, body=None)
 
 
@@ -145,3 +146,20 @@ async def test_no_fallback_after_partial_output():
     router.add_user("hi")
     with pytest.raises(LLMError, match="broke off"):
         await drain(router)
+
+
+async def test_groq_short_rate_limit_waits_visibly_then_retries_same_model():
+    client = FakeGroq([rate_limited("0"), [chunk(content="hi")]])
+    convo = GroqConversation(client=client, models=["a", "b"])
+    convo.add_user("hi")
+    items = [i async for i in convo.stream("sys", [])]
+    assert items[0].kind == "notice" and "Retrying" in items[0].text
+    assert [c["model"] for c in client.calls] == ["a", "a"] and items[-1].model == "a"
+
+
+async def test_groq_long_rate_limit_moves_on_without_waiting():
+    client = FakeGroq([rate_limited("300"), [chunk(content="hi")]])
+    convo = GroqConversation(client=client, models=["a", "b"])
+    convo.add_user("hi")
+    items = [i async for i in convo.stream("sys", [])]
+    assert [c["model"] for c in client.calls] == ["a", "b"] and not any(getattr(i, "kind", "") == "notice" for i in items)

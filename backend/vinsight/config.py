@@ -24,8 +24,10 @@ class Settings(BaseSettings):
     # Groq. gpt-oss-120b is the strongest tool-use model on Groq's free tier; qwen3.8-27b is faster to
     # get under the rate limit but made factual mistakes in testing, so it is not a default fallback.
     groq_api_key: str | None = None
-    groq_models: list[str] = ["openai/gpt-oss-120b"]
-    groq_max_retries: int = 3  # free tier is ~8K tokens/min; waiting out a 429 beats a weaker model
+    # gpt-oss-20b is the last resort: smaller, but it has its own daily token budget, so the app keeps
+    # answering once the 120b model's free 200K tokens/day are spent.
+    groq_models: list[str] = ["openai/gpt-oss-120b", "openai/gpt-oss-20b"]
+    groq_max_wait_s: float = 20.0  # wait out a per-minute rate limit up to this long, else switch model
     groq_timeout_s: float = 30.0
     groq_max_completion_tokens: int = 2048
     groq_notetaker_model: str = "openai/gpt-oss-20b"  # separate rate-limit budget from the advisor
