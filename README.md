@@ -1,6 +1,6 @@
 # VINsight
 
-A used-car buying copilot, built for people who have never bought a car. Three personas share one
+A used-car buying copilot, built for people who have never bought a car. Four personas share one
 conversation:
 
 - **Coach** teaches how buying a used car works: the real budget, titles, financing, inspections, scams.
@@ -14,7 +14,9 @@ conversation:
 Every fact about a vehicle carries a citation you can click, and the UI flags any citation that
 doesn't trace back to a tool result.
 
-> Demo GIF goes here once the verdict step lands.
+![VINsight demo: a VIN check that ends in CAUTION, then a scam listing caught as AVOID](docs/demo.gif)
+
+*A real recording of the app (sped up): Inspector, a scam listing, Scout, Coach, an Advisor call, and the settings.* [MP4 version](docs/demo.mp4)
 
 ## Status
 
@@ -105,6 +107,17 @@ Command line, no UI:
 cd backend
 .venv/bin/vinsight -p inspector "Is 1HGCM82633A004352 worth a look?"
 .venv/bin/vinsight -p coach      # interactive chat with a persona
+```
+
+## Demo recording
+
+The GIF above is recorded from the running app with Playwright, so it can be re-made whenever
+the UI changes:
+
+```bash
+cd demo && pnpm install && npx playwright install chromium
+pnpm record        # needs the app running on :3000 / :8000
+./make-gif.sh      # writes docs/demo.gif and docs/demo.mp4
 ```
 
 ## Tests
