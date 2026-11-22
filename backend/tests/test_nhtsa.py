@@ -57,10 +57,11 @@ async def test_compare_model_years():
     assert c.years[0].complaints == 0  # no fixture: NHTSA has nothing on record
 
 
-async def test_compare_model_years_caps_the_span():
+async def test_compare_model_years_keeps_the_12_most_recent_years_of_a_wide_range():
     async with NHTSAClient() as client:
-        with pytest.raises(NHTSAError, match="at most 12"):
-            await client.compare_model_years("HONDA", "Accord", 2000, 2020)
+        c = await client.compare_model_years("HONDA", "Accord", 1995, 2010)
+    assert [y.year for y in c.years] == list(range(1999, 2011))
+    assert c.note.startswith("Only the 12 most recent years")
 
 
 async def test_mcp_server_exposes_tools_and_readable_errors():

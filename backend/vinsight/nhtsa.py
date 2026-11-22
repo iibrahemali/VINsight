@@ -215,8 +215,10 @@ class NHTSAClient:
     async def compare_model_years(self, make: str, model: str, start_year: int, end_year: int) -> ModelYearComparison:
         if end_year < start_year:
             start_year, end_year = end_year, start_year
-        if end_year - start_year > 11:
-            raise NHTSAError("compare at most 12 model years at a time")
+        # Cap the work (2 NHTSA calls per year): a wider range keeps its most recent 12 years.
+        clamped = end_year - start_year > 11
+        if clamped:
+            start_year = end_year - 11
         limit = asyncio.Semaphore(4)  # be polite to NHTSA
 
         async def one(year: int) -> YearStats:
@@ -237,7 +239,7 @@ class NHTSAClient:
             )
 
         years = await asyncio.gather(*(one(y) for y in range(start_year, end_year + 1)))
-        return ModelYearComparison(
+        comparison = ModelYearComparison(
             make=make,
             model=model,
             years=list(years),
@@ -247,3 +249,6 @@ class NHTSAClient:
                 url=f"https://www.nhtsa.gov/vehicle/{end_year}/{make}/{model}".replace(" ", "%20"),
             ),
         )
+        if clamped:
+            comparison.note = f"Only the 12 most recent years asked for ({start_year}-{end_year}) were compared. " + comparison.note
+        return comparison
