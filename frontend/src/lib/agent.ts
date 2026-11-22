@@ -69,7 +69,7 @@ export type AttachmentCard = {
   description?: string | null;
   image?: string | null;
   pages?: number | null;
-  status: "ok" | "blocked" | "empty";
+  status: "ok" | "partial" | "blocked" | "empty";
   note?: string | null;
   chars: number;
   vins: string[];

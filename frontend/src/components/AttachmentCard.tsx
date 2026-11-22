@@ -9,7 +9,8 @@ export type PendingAttachment = { key: string; label: string; kind: "link" | "fi
 export function AttachmentCard({ item, onRemove, compact = false }: { item: PendingAttachment; onRemove?: () => void; compact?: boolean }) {
   const card = item.card;
   const loading = !card && !item.error;
-  const problem = item.error ?? (card && card.status !== "ok" ? card.note : null);
+  const partial = card?.status === "partial";
+  const problem = item.error ?? (card && card.status !== "ok" && !partial ? card.note : null);
   const isLink = item.kind === "link";
   const title = card?.title || card?.name || item.label;
   const sub = card ? (isLink ? card.site : card.pages ? `PDF · ${card.pages} page${card.pages > 1 ? "s" : ""}` : "Text") : item.label;
@@ -42,6 +43,10 @@ export function AttachmentCard({ item, onRemove, compact = false }: { item: Pend
           {problem ? (
             <span className="inline-flex items-center gap-1 text-[11px] text-warn" title={problem}>
               <AlertTriangle size={11} /> {isLink ? "Couldn't read · paste text" : "Unreadable"}
+            </span>
+          ) : partial ? (
+            <span className="inline-flex items-center gap-1 text-[11px] text-muted" title={card?.note ?? undefined}>
+              Preview read · paste text for more
             </span>
           ) : card ? (
             <span className="text-[11px] text-ok">Read · {(card.chars / 1000).toFixed(1)}k chars</span>
