@@ -59,6 +59,8 @@ class GroqConversation:
                     stream=True,
                     **tool_args,
                     **({"reasoning_effort": effort} if effort and model.startswith("openai/gpt-oss") else {}),
+                    # Qwen otherwise puts its reasoning inline in <think> tags; ask for it separately.
+                    **({"reasoning_format": "parsed"} if model.startswith("qwen/") else {}),
                 )
                 break
             except (groq.RateLimitError, groq.InternalServerError, groq.APITimeoutError, groq.APIConnectionError) as e:

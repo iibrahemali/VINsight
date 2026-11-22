@@ -13,9 +13,16 @@ from vinsight.llm.base import Conversation, Delta, LLMError, Replayable, Step, T
 
 
 class ConversationRouter:
-    def __init__(self, factories: dict[str, Callable[[], Replayable]], active: str, fallback: bool = True):
+    def __init__(
+        self,
+        factories: dict[str, Callable[[], Replayable]],
+        active: str,
+        fallback: bool = True,
+        labels: dict[str, str] | None = None,
+    ):
         # Order matters: on failure, the first other provider in this order takes over.
         self._factories = factories
+        self._labels = {**_LABELS, **(labels or {})}
         self.active = active
         self.fallback = fallback
         self._convo: Conversation = factories[active]()
@@ -65,8 +72,8 @@ class ConversationRouter:
                 raise
             failed = self.active
             self.use(backup)
-            yield Delta("notice", f"{_LABELS.get(failed, failed)} is unavailable right now ({e}). "
-                                  f"Switched to {_LABELS.get(backup, backup)}.")
+            yield Delta("notice", f"{self._labels.get(failed, failed)} is unavailable right now ({e}). "
+                                  f"Switched to {self._labels.get(backup, backup)}.")
         async for item in self._convo.stream(system, tools, effort):
             if isinstance(item, Step):
                 self._log.append(("model", item))

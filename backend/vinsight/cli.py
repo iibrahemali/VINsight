@@ -90,7 +90,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="vinsight", description=__doc__)
     parser.add_argument("prompt", nargs="*", help="one-shot question; omit for interactive chat")
     parser.add_argument("-p", "--persona", choices=list(PERSONAS), default=DEFAULT_PERSONA)
-    parser.add_argument("-m", "--model", choices=list(PROVIDERS), help="provider for this run (default from .env)")
+    parser.add_argument("-m", "--model", choices=list(PROVIDERS), help="model for this run (default from .env)")
     parser.add_argument("--no-trace", action="store_true", help="hide the reasoning and tool trace")
     args = parser.parse_args()
     asyncio.run(_main(" ".join(args.prompt) or None, args.persona, args.model, not args.no_trace))

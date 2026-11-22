@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -9,9 +8,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=REPO_ROOT / ".env", extra="ignore")
 
-    vinsight_provider: Literal["gemini", "claude", "groq"] = "gemini"
-    # Takes over for the rest of a conversation when the primary fails. "none" disables it.
-    vinsight_backup_provider: Literal["gemini", "groq", "claude", "none"] = "groq"
+    # A model option from vinsight.llm.MODELS: gpt-oss-120b | gpt-oss-20b | qwen3.8-27b | gemini | claude
+    vinsight_provider: str = "gpt-oss-120b"
+    # Takes over for the rest of a conversation when the active model fails. "none" disables it.
+    vinsight_backup_provider: str = "gemini"
     vinsight_max_turns: int = 12
 
     # Gemini: models are tried in order; later ones are fallbacks when earlier ones are overloaded.

@@ -16,7 +16,7 @@ from vinsight import attachments, notetaker, shortlist_check, voice
 from vinsight.agent import DEFAULT_PERSONA, PERSONAS, Agent, Prefetch, ToolBox, TraceEvent
 from vinsight.config import settings
 from vinsight.keys import Keys
-from vinsight.llm import PROVIDERS, available_providers, new_conversation, provider_factories
+from vinsight.llm import MODELS, available_providers, new_conversation, provider_factories, resolve
 from vinsight.models import BuyerProfile
 
 _DONE = object()
@@ -81,9 +81,10 @@ async def personas() -> list[dict]:
 @app.get("/api/models")
 async def models(request: Request) -> dict:
     available = available_providers(Keys.from_request(request))
+    wanted = resolve(settings.vinsight_provider)
     return {
-        "default": settings.vinsight_provider if settings.vinsight_provider in available else (available or [None])[0],
-        "models": [{"id": p, "label": PROVIDERS[p]["label"], "detail": PROVIDERS[p]["detail"]} for p in available],
+        "default": wanted if wanted in available else (available or [None])[0],
+        "models": [{"id": m, "label": MODELS[m]["label"], "detail": MODELS[m]["detail"]} for m in available],
     }
 
 
@@ -188,7 +189,7 @@ async def chat(req: ChatRequest, request: Request) -> StreamingResponse:
         async with session.lock:
             try:
                 reply: list[str] = []
-                async for event in session.agent.run(message, req.persona, req.provider, prefetch):
+                async for event in session.agent.run(message, req.persona, resolve(req.provider), prefetch):
                     if event.type == "text":
                         reply.append(event.text or "")
                     await queue.put(event)
