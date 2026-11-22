@@ -13,3 +13,7 @@ screenshots/
 Screenshot*.png
 Screen Shot*.png
 *.screenshot.png
+
+# Personal notes
+LESSONS.md
+CLAUDE.md
