@@ -209,7 +209,8 @@ export function VoiceCall(props: {
           setUsedEngine(speaker.current?.lastEngine ?? null);
           if (statusRef.current !== "hearing") set("speaking");
         },
-        onIdle: () => !streaming.current && statusRef.current === "speaking" && set("listening"),
+        // Speech finished (or couldn't play at all): back to listening once the reply is complete.
+        onIdle: () => !streaming.current && ["speaking", "thinking"].includes(statusRef.current) && set("listening"),
         onFallback: (note) => setVoiceNote(note),
       });
       if (!vs.stt) {
