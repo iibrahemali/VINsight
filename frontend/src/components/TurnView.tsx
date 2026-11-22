@@ -1,4 +1,5 @@
 import { AlertTriangle, ArrowRightLeft, OctagonX, PhoneCall } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { Answer } from "@/components/Answer";
 import { AttachmentCard, type PendingAttachment } from "@/components/AttachmentCard";
@@ -19,6 +20,8 @@ export type Turn = {
   pending: boolean;
   stopped?: boolean;
   call?: CallSummary; // an advisor voice call, summarized into the chat when it ends
+  modelLabel?: string; // the model picked when this turn was sent
+  startedAt?: number;
 };
 
 function CallView({ call }: { call: CallSummary }) {
@@ -51,13 +54,35 @@ function CallView({ call }: { call: CallSummary }) {
   );
 }
 
+// Shown only until the first reasoning token arrives, so it's never a dead "loading" state.
+function Waiting({ label, since }: { label?: string; since?: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(id);
+  }, []);
+  const s = since ? Math.floor((now - since) / 1000) : 0;
+  return (
+    <div className="flex items-center gap-2 text-[13px] text-muted">
+      <span className="dot-pulse" />
+      <span className="shimmer">Waiting for {label ?? "the model"}…</span>
+      {s > 0 && <span className="font-mono text-[11px]">{s}s</span>}
+    </div>
+  );
+}
+
 export function TurnView({ turn, verified }: { turn: Turn; verified: Set<string> }) {
   if (turn.call) return <CallView call={turn.call} />;
   const blocks = toBlocks(turn.events);
   const persona = PERSONAS.find((p) => p.id === turn.persona);
   const lastText = blocks.findLastIndex((b) => b.kind === "text");
   const done = blocks.find((b) => b.kind === "done");
-  const waiting = turn.pending && blocks.length === 0;
+  // Between steps (after a tool finishes, or a notice) the model is working but nothing streams yet:
+  // show that, rather than a screen that looks frozen.
+  const last = blocks.at(-1);
+  const between = last && ((last.kind === "tool" && last.result) || last.kind === "notice");
+  const waiting = turn.pending && (blocks.length === 0 || between);
+  const lastAt = turn.events.at(-1)?.at;
 
   return (
     <article className="space-y-3">
@@ -82,11 +107,7 @@ export function TurnView({ turn, verified }: { turn: Turn; verified: Set<string>
         {done?.kind === "done" && done.event.model && <span className="font-normal text-muted">· {done.event.model}</span>}
       </div>
 
-      {waiting && (
-        <div className="flex items-center gap-2 text-[13px] text-muted">
-          <span className="dot-pulse" /> <span className="shimmer">Starting…</span>
-        </div>
-      )}
+
 
       <div className="space-y-2.5">
         {blocks.map((b, i) => {
@@ -135,6 +156,7 @@ export function TurnView({ turn, verified }: { turn: Turn; verified: Set<string>
               );
           }
         })}
+        {waiting && <Waiting label={turn.modelLabel} since={blocks.length ? lastAt : turn.startedAt} />}
         {turn.stopped && (
           <p className="flex items-center gap-1.5 text-[12px] text-muted">
             <OctagonX size={13} /> Stopped
