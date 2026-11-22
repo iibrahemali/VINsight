@@ -28,6 +28,9 @@ class ScriptedConversation:
                 yield Delta("text", word + " ")
         yield step
 
+    def add_model_turn(self, step) -> None:
+        pass
+
     def add_tool_results(self, results) -> None:
         self.tool_results.append(results)
 
@@ -134,3 +137,15 @@ async def test_stopping_mid_tool_call_keeps_history_valid():
 
     [results] = convo.tool_results
     assert results[0].is_error and "cancelled" in results[0].content
+
+
+async def test_vin_lookups_run_in_code_before_the_model():
+    from vinsight.llm import ConversationRouter
+
+    convo = ScriptedConversation([Step(texts=["Verdict: CAUTION"])])
+    router = ConversationRouter({"x": lambda: convo}, active="x")
+    async with ToolBox(server) as tools:
+        events = [e async for e in Agent(tools, router).run("Check 1HGCM82633A004352", "inspector", vin="1HGCM82633A004352")]
+    calls = [e.name for e in events if e.type == "tool_call"]
+    assert calls == ["decode_vin", "get_recalls", "get_complaints"]
+    assert len(convo.requests) == 1  # the model answered in a single step

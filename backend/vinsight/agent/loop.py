@@ -100,6 +100,7 @@ class Agent:
         persona: str = DEFAULT_PERSONA,
         provider: str | None = None,
         prefetch: list[Prefetch] | None = None,
+        vin: str | None = None,
     ) -> AsyncIterator[TraceEvent]:
         """Run one user turn. `thinking` and `text` events are streamed deltas, not whole blocks."""
         p = PERSONAS.get(persona, PERSONAS[DEFAULT_PERSONA])
@@ -113,16 +114,23 @@ class Agent:
         pending: list[ToolCall] = []  # tool calls the model made whose results aren't recorded yet
 
         try:
-            if prefetch and isinstance(self.conversation, ConversationRouter):
-                runs = [(f, ToolCall(id=f"prefetch-{i}", name=f.name, input=f.input)) for i, f in enumerate(prefetch)]
-                for f, call in runs:
-                    yield TraceEvent(type="tool_call", turn=0, name=f.name, input=f.shown_input or f.input)
-                outcomes = await asyncio.gather(*(self.tools.call(call, 0) for _, call in runs))
-                for _, event in outcomes:
-                    yield event
-                shown = [ToolCall(id=c.id, name=c.name, input=f.shown_input or f.input) for f, c in runs]
-                results = [ToolResult(call=s, content=r.content, is_error=r.is_error) for s, (r, _) in zip(shown, outcomes)]
-                self.conversation.add_prefetched(Step(tool_calls=shown, stop="tool_use"), results)
+            if isinstance(self.conversation, ConversationRouter):
+                if prefetch:
+                    async for event in self._prefetch(prefetch, "attach"):
+                        yield event
+                if vin:
+                    # A VIN check always runs the same steps, so code runs them, not the model: decode,
+                    # then recalls + complaints together. The model then answers in one step, which also
+                    # keeps the request small enough for Groq's free per-minute token limit.
+                    decoded: list[ToolResult] = []
+                    async for event in self._prefetch([Prefetch(name="decode_vin", input={"vin": vin})], "vin", decoded):
+                        yield event
+                    v = decoded[0].content if decoded and not decoded[0].is_error else None
+                    if isinstance(v, dict) and v.get("make") and v.get("model") and v.get("year"):
+                        car = {"make": v["make"], "model": v["model"], "year": v["year"]}
+                        lookups = [Prefetch(name="get_recalls", input=car), Prefetch(name="get_complaints", input=car)]
+                        async for event in self._prefetch(lookups, "car"):
+                            yield event
 
             for turn in range(settings.vinsight_max_turns):
                 t0 = time.perf_counter()
@@ -175,6 +183,22 @@ class Agent:
                 self.conversation.add_tool_results(
                     [ToolResult(call=c, content="cancelled: the user stopped this answer", is_error=True) for c in pending]
                 )
+
+    async def _prefetch(
+        self, items: list[Prefetch], tag: str, collect: list[ToolResult] | None = None
+    ) -> AsyncIterator[TraceEvent]:
+        """Run tool calls before the model's first step and record them as if the model had made them."""
+        runs = [(f, ToolCall(id=f"prefetch-{tag}-{i}", name=f.name, input=f.input)) for i, f in enumerate(items)]
+        for f, call in runs:
+            yield TraceEvent(type="tool_call", turn=0, name=f.name, input=f.shown_input or f.input)
+        outcomes = await asyncio.gather(*(self.tools.call(call, 0) for _, call in runs))
+        for _, event in outcomes:
+            yield event
+        shown = [ToolCall(id=c.id, name=c.name, input=f.shown_input or f.input) for f, c in runs]
+        results = [ToolResult(call=sc, content=r.content, is_error=r.is_error) for sc, (r, _) in zip(shown, outcomes)]
+        self.conversation.add_prefetched(Step(tool_calls=shown, stop="tool_use"), results)
+        if collect is not None:
+            collect.extend(results)
 
     async def _call(self, call: ToolCall, allowed: list[ToolSpec], turn: int) -> tuple[ToolResult, TraceEvent]:
         # The model only sees this persona's tools, but enforce it here too rather than trust that.

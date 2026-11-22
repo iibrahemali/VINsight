@@ -13,6 +13,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from vinsight import attachments, notetaker, shortlist_check, voice
+from vinsight import vin as vinlib
 from vinsight.agent import DEFAULT_PERSONA, PERSONAS, Agent, Prefetch, ToolBox, TraceEvent
 from vinsight.config import settings
 from vinsight.keys import Keys
@@ -183,13 +184,17 @@ async def chat(req: ChatRequest, request: Request) -> StreamingResponse:
         for item in items[:2]
         if req.persona == "inspector" and item.status in ("ok", "partial") and item.text
     ]
+    # Inspector with a VIN in the message: decode + recalls + complaints run in code first.
+    # find_vins only matches well-formed VINs; a bad check digit is reported by decode_vin itself.
+    found = vinlib.find_vins(req.message) if req.persona == "inspector" else []
+    vin = found[0] if found else None
     queue: asyncio.Queue = asyncio.Queue()
 
     async def produce():
         async with session.lock:
             try:
                 reply: list[str] = []
-                async for event in session.agent.run(message, req.persona, resolve(req.provider), prefetch):
+                async for event in session.agent.run(message, req.persona, resolve(req.provider), prefetch, vin):
                     if event.type == "text":
                         reply.append(event.text or "")
                     await queue.put(event)
