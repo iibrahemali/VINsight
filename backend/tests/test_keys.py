@@ -53,3 +53,16 @@ def test_rebind_rebuilds_active_provider_with_history():
     router.rebind({"groq": factory("new")})
     assert made[-1].key == "new" and [k for k, _ in made[-1].received] == ["user", "model"]
 
+
+def test_fix_wav_rewrites_placeholder_sizes():
+    import struct
+
+    from vinsight.voice import fix_wav
+
+    fmt = struct.pack("<4sIHHIIHH", b"fmt ", 16, 1, 1, 24000, 48000, 2, 16)
+    samples = b"\x00\x01" * 100
+    broken = b"RIFF" + b"\xff\xff\xff\xff" + b"WAVE" + fmt + b"data" + b"\xff\xff\xff\xff" + samples
+    fixed = fix_wav(broken)
+    assert int.from_bytes(fixed[4:8], "little") == len(fixed) - 8
+    data_pos = fixed.index(b"data")
+    assert int.from_bytes(fixed[data_pos + 4:data_pos + 8], "little") == len(samples)

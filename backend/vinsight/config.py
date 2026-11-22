@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     groq_notetaker_model: str = "openai/gpt-oss-20b"  # separate rate-limit budget from the advisor
     groq_stt_model: str = "whisper-large-v3-turbo"
     groq_tts_model: str = "canopylabs/orpheus-v1-english"
-    groq_tts_voice: str = "tara"
+    groq_tts_voice: str = "daniel"  # male. Orpheus voices on Groq: austin, daniel, troy (male); autumn, diana, hannah
     groq_max_text_chars: int = 110  # long prose in tool results is cut to this for Groq's small budget
 
     # Claude
