@@ -90,27 +90,35 @@ export function ListingXray({ x }: { x: Xray }) {
   );
 }
 
-// "**Verdict: AVOID**" at the top of an answer becomes a badge. Models vary the markdown
-// ("Verdict: **AVOID**", "**Verdict:** AVOID", "Verdict – AVOID"), so accept all of those.
-const VERDICT_RE = /^\s*(?:\*\*)?\s*Verdict\s*(?:\*\*)?\s*[:\-–—]\s*(?:\*\*)?\s*(BUY|CAUTION|AVOID)\b\s*(?:\*\*)?[ \t]*\n?/i;
+// The answer's first line, "Verdict: CAUTION — <bottom line>", becomes a compact header.
+// Models vary the markdown ("**Verdict: CAUTION**", "Verdict: **AVOID**", "**Verdict:** BUY"),
+// so accept all of those, with or without the bottom-line sentence.
+const VERDICT_RE =
+  /^\s*(?:\*\*)?\s*Verdict\s*(?:\*\*)?\s*[:\-–—]\s*(?:\*\*)?\s*(BUY|CAUTION|AVOID)\b\s*(?:\*\*)?[ \t]*(?:[:\-–—][ \t]*)?([^\n]*)\n?/i;
 
-export function splitVerdict(text: string): { verdict: "BUY" | "CAUTION" | "AVOID" | null; rest: string } {
+export type Verdict = "BUY" | "CAUTION" | "AVOID";
+
+export function splitVerdict(text: string): { verdict: Verdict | null; headline: string; rest: string } {
   const m = VERDICT_RE.exec(text);
-  return m ? { verdict: m[1].toUpperCase() as "BUY" | "CAUTION" | "AVOID", rest: text.slice(m[0].length) } : { verdict: null, rest: text };
+  if (!m) return { verdict: null, headline: "", rest: text };
+  return { verdict: m[1].toUpperCase() as Verdict, headline: m[2].replace(/\*\*/g, "").trim(), rest: text.slice(m[0].length) };
 }
 
-const VERDICT_STYLE = {
-  BUY: { cls: "border-ok/40 bg-ok/10 text-ok", sub: "Worth pursuing, pending a mechanic's inspection" },
-  CAUTION: { cls: "border-warn/40 bg-warn/10 text-warn", sub: "Only with answers to the questions below" },
-  AVOID: { cls: "border-bad/40 bg-bad/10 text-bad", sub: "The risks outweigh the deal" },
-} as const;
+const VERDICT_STYLE: Record<Verdict, { dot: string; text: string; label: string }> = {
+  BUY: { dot: "bg-ok", text: "text-ok", label: "Worth a look" },
+  CAUTION: { dot: "bg-warn", text: "text-warn", label: "Caution" },
+  AVOID: { dot: "bg-bad", text: "text-bad", label: "Avoid" },
+};
 
-export function VerdictBadge({ verdict }: { verdict: "BUY" | "CAUTION" | "AVOID" }) {
+export function VerdictHeader({ verdict, headline }: { verdict: Verdict; headline: string }) {
   const s = VERDICT_STYLE[verdict];
   return (
-    <div className={`flex items-baseline gap-3 rounded-2xl border px-4 py-3 ${s.cls}`}>
-      <span className="text-xl font-bold tracking-tight">{verdict}</span>
-      <span className="text-[13px] opacity-80">{s.sub}</span>
+    <div className="flex flex-col gap-1.5 border-b border-line pb-3 sm:flex-row sm:items-baseline sm:gap-3">
+      <span className={`inline-flex w-fit shrink-0 items-center gap-1.5 rounded-full border border-line px-2.5 py-0.5 text-[12px] font-semibold ${s.text}`}>
+        <span className={`size-1.5 rounded-full ${s.dot}`} />
+        {s.label}
+      </span>
+      {headline && <p className="text-[16px] font-medium leading-snug">{headline}</p>}
     </div>
   );
 }

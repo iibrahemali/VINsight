@@ -171,6 +171,13 @@ export function sourceIds(events: TraceEvent[], attachmentIds: string[] = []): S
       if (Array.isArray(o.recall_campaigns)) {
         o.recall_campaigns.forEach((c) => ids.add(`nhtsa_recall:${c}`.toLowerCase()));
       }
+      // A year comparison carries each year's complaint total, so [complaints:make:model:year] for any
+      // year in it is backed by tool data too.
+      if (Array.isArray(o.years) && typeof o.make === "string" && typeof o.model === "string") {
+        for (const y of o.years as { year?: number }[]) {
+          if (y?.year) ids.add(`nhtsa_complaint:complaints:${o.make}:${o.model}:${y.year}`.toLowerCase());
+        }
+      }
       Object.values(o).forEach(walk);
     }
   };
@@ -214,10 +221,12 @@ export function citationUrl(kind: string, id: string): string | undefined {
 // bracket: "[ recall:19V182000, recall:19V499000 ]" becomes two chips.
 const CITE_KINDS = "vpic|recalls?|complaints?|years|doc|link";
 const CITE_GROUP = new RegExp(`\\[\\s*((?:(?:${CITE_KINDS}):[^\\],;\\n]+?\\s*[,;]?\\s*)+)\\]`, "gi");
-const CITE_ONE = new RegExp(`(${CITE_KINDS}):([^\\],;\\n]+)`, "i");
+const CITE_ONE = new RegExp(`(${CITE_KINDS}):([^\\]),;\\n]+)`, "i");
+// Some models write "(source: years:honda:civic:2016-2020)" instead of brackets.
+const CITE_PAREN = new RegExp(`\\(\\s*(?:sources?\\s*:\\s*)?((?:(?:${CITE_KINDS}):[^),;\\n]+?\\s*[,;]?\\s*)+)\\)`, "gi");
 
 export function linkCitations(markdown: string): string {
-  return markdown.replace(CITE_GROUP, (_, inner: string) =>
+  return markdown.replace(CITE_PAREN, (_, inner: string) => `[${inner}]`).replace(CITE_GROUP, (_, inner: string) =>
     inner
       .split(/[,;]/)
       .map((part) => CITE_ONE.exec(part.trim()))

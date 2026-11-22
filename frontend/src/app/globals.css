@@ -61,13 +61,43 @@ body {
   color: var(--ink);
 }
 
-.answer h1, .answer h2, .answer h3 { font-weight: 600; margin: 1rem 0 0.4rem; }
+.answer h1, .answer h2 { font-weight: 600; margin: 1.1rem 0 0.4rem; }
+/* Section headings in answers read as quiet labels, like a well-made report. */
+.answer h3 {
+  margin: 1.25rem 0 0.35rem;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
 .answer p { margin: 0.5rem 0; line-height: 1.65; }
 .answer ul { list-style: disc; padding-left: 1.25rem; margin: 0.4rem 0; }
 .answer ol { list-style: decimal; padding-left: 1.25rem; margin: 0.4rem 0; }
 .answer li { margin: 0.25rem 0; line-height: 1.6; }
 .answer strong { font-weight: 600; }
 .answer > :first-child { margin-top: 0; }
+.answer ol > li::marker { color: var(--muted); }
+
+/* Numbered citations: small, quiet, verified in the Sources list below the answer. */
+.answer .cite {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.15rem;
+  height: 1.05rem;
+  margin-left: 2px;
+  padding: 0 3px;
+  border-radius: 4px;
+  font-family: var(--font-geist-mono);
+  font-size: 10px;
+  line-height: 1;
+  vertical-align: super;
+  color: var(--muted);
+  background: color-mix(in oklab, var(--muted) 14%, transparent);
+  text-decoration: none;
+}
+.answer .cite:hover { color: var(--ink); }
+.answer .cite-bad { color: var(--bad); background: color-mix(in oklab, var(--bad) 16%, transparent); }
 .answer table { width: 100%; margin: 0.75rem 0; border-collapse: collapse; font-size: 0.9em; display: block; overflow-x: auto; }
 .answer th, .answer td { border: 1px solid var(--line); padding: 0.4rem 0.6rem; text-align: left; vertical-align: top; }
 .answer th { background: var(--panel); font-weight: 600; }

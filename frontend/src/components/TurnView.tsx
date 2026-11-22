@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Answer } from "@/components/Answer";
 import { AttachmentCard, type PendingAttachment } from "@/components/AttachmentCard";
 import { BriefCard } from "@/components/BriefCard";
-import { ListingXray, VerdictBadge, splitVerdict, type Xray } from "@/components/ListingXray";
+import { ListingXray, VerdictHeader, splitVerdict, type Xray } from "@/components/ListingXray";
 import { PersonaIcon } from "@/components/PersonaIcon";
 import { Thinking } from "@/components/Thinking";
 import { ToolStep } from "@/components/ToolStep";
@@ -127,10 +127,10 @@ export function TurnView({ turn, verified }: { turn: Turn; verified: Set<string>
                 </div>
               );
             case "text": {
-              const { verdict, rest } = splitVerdict(b.text);
+              const { verdict, headline, rest } = splitVerdict(b.text);
               return (
                 <div key={i} className="space-y-3">
-                  {verdict && <VerdictBadge verdict={verdict} />}
+                  {verdict && <VerdictHeader verdict={verdict} headline={headline} />}
                   <Answer text={rest} verified={verified} streaming={turn.pending && i === lastText && i === blocks.length - 1} />
                 </div>
               );
