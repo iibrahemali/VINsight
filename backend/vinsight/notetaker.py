@@ -49,8 +49,10 @@ def merge(profile: BuyerProfile, update: dict) -> BuyerProfile:
     return BuyerProfile(**data)
 
 
-async def take_notes(profile: BuyerProfile, user: str, advisor: str, client: groq.AsyncGroq | None = None) -> BuyerProfile:
-    client = client or groq.AsyncGroq(api_key=settings.groq_api_key, max_retries=2, timeout=20)
+async def take_notes(
+    profile: BuyerProfile, user: str, advisor: str, client: groq.AsyncGroq | None = None, api_key: str | None = None
+) -> BuyerProfile:
+    client = client or groq.AsyncGroq(api_key=api_key or settings.groq_api_key, max_retries=2, timeout=20)
     notes = json.dumps(profile.model_dump(exclude={"source"}, exclude_defaults=True))
     response = await client.chat.completions.create(
         model=settings.groq_notetaker_model,

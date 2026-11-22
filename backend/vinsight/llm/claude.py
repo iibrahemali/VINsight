@@ -11,8 +11,8 @@ FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
 
 class ClaudeConversation:
-    def __init__(self, client: anthropic.AsyncAnthropic | None = None):
-        self._client = client or anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    def __init__(self, client: anthropic.AsyncAnthropic | None = None, api_key: str | None = None):
+        self._client = client or anthropic.AsyncAnthropic(api_key=api_key or settings.anthropic_api_key)
         self.history: list[dict] = []
 
     def add_user(self, text: str) -> None:

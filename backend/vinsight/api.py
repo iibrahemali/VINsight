@@ -7,7 +7,7 @@ import asyncio
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -15,15 +15,17 @@ from pydantic import BaseModel
 from vinsight import attachments, notetaker, shortlist_check, voice
 from vinsight.agent import DEFAULT_PERSONA, PERSONAS, Agent, Prefetch, ToolBox, TraceEvent
 from vinsight.config import settings
-from vinsight.llm import PROVIDERS, available_providers
+from vinsight.keys import Keys
+from vinsight.llm import PROVIDERS, available_providers, new_conversation, provider_factories
 from vinsight.models import BuyerProfile
 
 _DONE = object()
 
 
 class Session:
-    def __init__(self, agent: Agent):
+    def __init__(self, agent: Agent, keys: Keys):
         self.agent = agent
+        self.keys = keys
         self.lock = asyncio.Lock()  # a conversation is a strict alternation of turns
         self.task: asyncio.Task | None = None
         self.profile = BuyerProfile()  # filled by the note-taker during advisor calls
@@ -38,10 +40,15 @@ class Sessions:
         self.tools = tools
         self._sessions: dict[str, Session] = {}
 
-    def get(self, session_id: str) -> Session:
-        if session_id not in self._sessions:
-            self._sessions[session_id] = Session(Agent(self.tools))
-        return self._sessions[session_id]
+    def get(self, session_id: str, keys: Keys) -> Session:
+        session = self._sessions.get(session_id)
+        if session is None:
+            session = self._sessions[session_id] = Session(Agent(self.tools, new_conversation(keys)), keys)
+        elif session.keys != keys:
+            # The visitor changed their keys in Settings: rebind providers, keep the conversation.
+            session.keys = keys
+            session.agent.conversation.rebind(provider_factories(keys)[1])
+        return session
 
     def find(self, session_id: str) -> Session | None:
         return self._sessions.get(session_id)
@@ -72,12 +79,47 @@ async def personas() -> list[dict]:
 
 
 @app.get("/api/models")
-async def models() -> dict:
-    available = available_providers()
+async def models(request: Request) -> dict:
+    available = available_providers(Keys.from_request(request))
     return {
         "default": settings.vinsight_provider if settings.vinsight_provider in available else (available or [None])[0],
         "models": [{"id": p, "label": PROVIDERS[p]["label"], "detail": PROVIDERS[p]["detail"]} for p in available],
     }
+
+
+@app.get("/api/keys")
+async def key_status(request: Request) -> dict:
+    """Where each key comes from ('yours', 'server' or 'none'), for the Settings panel. Never returns keys."""
+    keys = Keys.from_request(request)
+    return {name: keys.source(name, request) for name in ("groq", "gemini")}
+
+
+class KeyCheck(BaseModel):
+    provider: str
+
+
+@app.post("/api/keys/check")
+async def check_key(req: KeyCheck, request: Request) -> dict:
+    """Validate the key the browser sent with a cheap, free call (listing models)."""
+    keys = Keys.from_request(request)
+    try:
+        if req.provider == "groq":
+            import groq
+
+            await groq.AsyncGroq(api_key=keys.groq, max_retries=0, timeout=10).models.list()
+        elif req.provider == "gemini":
+            from google import genai
+
+            client = genai.Client(api_key=keys.gemini)
+            async for _ in await client.aio.models.list(config={"page_size": 1}):
+                break
+        else:
+            raise HTTPException(400, "unknown provider")
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"ok": False, "error": str(e).split("\n")[0][:200]}
+    return {"ok": True}
 
 
 class LinkRequest(BaseModel):
@@ -122,9 +164,10 @@ def _with_attachments(message: str, items: list[attachments.Attachment]) -> str:
 
 
 @app.post("/api/chat")
-async def chat(req: ChatRequest) -> StreamingResponse:
+async def chat(req: ChatRequest, request: Request) -> StreamingResponse:
     session_id = req.session_id or uuid.uuid4().hex
-    session = app.state.sessions.get(session_id)
+    keys = Keys.from_request(request)
+    session = app.state.sessions.get(session_id, keys)
     items = app.state.attachments.get_many(req.attachments)
     message = _with_attachments(req.message, items)
     if req.persona == "advisor" and session.advisor_notes:
@@ -149,10 +192,10 @@ async def chat(req: ChatRequest) -> StreamingResponse:
                     if event.type == "text":
                         reply.append(event.text or "")
                     await queue.put(event)
-                if req.persona == "advisor" and settings.groq_api_key:
+                if req.persona == "advisor" and keys.groq:
                     # After the reply has streamed (and is being spoken), update the caller's notes.
                     try:
-                        session.profile = await notetaker.take_notes(session.profile, req.message, "".join(reply))
+                        session.profile = await notetaker.take_notes(session.profile, req.message, "".join(reply), api_key=keys.groq)
                         await queue.put(TraceEvent(type="profile", turn=0, output=session.profile.model_dump()))
                         if any(not e.checked for e in session.profile.shortlist):
                             checked = await shortlist_check.check_all(session.profile.shortlist)

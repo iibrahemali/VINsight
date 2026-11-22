@@ -22,10 +22,10 @@ def _compact(value, max_str: int):
 
 
 class GroqConversation:
-    def __init__(self, client: groq.AsyncGroq | None = None, models: list[str] | None = None):
+    def __init__(self, client: groq.AsyncGroq | None = None, models: list[str] | None = None, api_key: str | None = None):
         # The SDK honours retry-after on 429s, so retries wait out the free tier's per-minute budget.
         self._client = client or groq.AsyncGroq(
-            api_key=settings.groq_api_key, max_retries=settings.groq_max_retries, timeout=settings.groq_timeout_s
+            api_key=api_key or settings.groq_api_key, max_retries=settings.groq_max_retries, timeout=settings.groq_timeout_s
         )
         self._models = models or settings.groq_models
         self.history: list[dict] = []

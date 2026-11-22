@@ -25,8 +25,8 @@ def _http_options() -> types.HttpOptions:
 
 
 class GeminiConversation:
-    def __init__(self, client: genai.Client | None = None, models: list[str] | None = None):
-        self._client = client or genai.Client(api_key=settings.gemini_api_key, http_options=_http_options())
+    def __init__(self, client: genai.Client | None = None, models: list[str] | None = None, api_key: str | None = None):
+        self._client = client or genai.Client(api_key=api_key or settings.gemini_api_key, http_options=_http_options())
         self._models = models or settings.gemini_models
         self.history: list[types.Content] = []
         # Tool calls replayed from another provider. Gemini can't accept function calls it didn't

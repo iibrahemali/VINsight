@@ -39,6 +39,14 @@ class ConversationRouter:
                 convo.add_tool_results(item)
         self._convo, self.active = convo, provider
 
+    def rebind(self, factories: dict[str, Callable[[], Replayable]]) -> None:
+        """Use new provider factories (e.g. the visitor changed their API keys) without losing the
+        conversation: the active provider is rebuilt from the neutral log."""
+        self._factories = factories
+        target = self.active if self.active in factories else next(iter(factories))
+        self.active = ""  # force use() to rebuild
+        self.use(target)
+
     def add_user(self, text: str) -> None:
         self._log.append(("user", text))
         self._convo.add_user(text)
