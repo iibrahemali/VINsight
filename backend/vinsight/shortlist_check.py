@@ -16,8 +16,31 @@ SPIKE_RATIO = 1.8  # a year this many times the median of its neighbours...
 SPIKE_MIN = 100  # ...and with at least this many complaints, is flagged
 
 
+_ONES = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9}
+_TEENS = {"ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15,
+          "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19}
+_SPOKEN_YEAR = re.compile(
+    r"\b(?:twenty|two thousand(?: and)?)[\s-]+(?:(twenty)(?:[\s-]+(" + "|".join(_ONES) + r"))?|(" + "|".join(_TEENS) + r")|(" + "|".join(_ONES) + r"))\b",
+    re.I,
+)
+
+
+def spoken_years_to_digits(text: str) -> str:
+    """The voice advisor says "twenty twenty one"; the year check needs "2021"."""
+
+    def convert(m: re.Match) -> str:
+        twenty, ones_after_twenty, teen, ones = m.groups()
+        if twenty:
+            return str(2020 + _ONES.get((ones_after_twenty or "").lower(), 0))
+        if teen:
+            return str(2000 + _TEENS[teen.lower()])
+        return str(2000 + _ONES[ones.lower()])
+
+    return _SPOKEN_YEAR.sub(convert, text)
+
+
 def _window(years: str) -> tuple[int, int] | None:
-    found = [int(y) for y in re.findall(r"(?:19|20)\d{2}", years)]
+    found = [int(y) for y in re.findall(r"(?:19|20)\d{2}", spoken_years_to_digits(years))]
     if not found:
         return None
     lo, hi = min(found), max(found)

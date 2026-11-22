@@ -111,3 +111,12 @@ def test_spike_detection_flags_outlier_years():
 
     assert spikes([y(2015, 381), y(2016, 1083), y(2017, 609), y(2018, 596)]) == [2016]
     assert spikes([y(2015, 40), y(2016, 90), y(2017, 35)]) == []  # under the minimum count
+
+
+def test_spoken_years_become_digits():
+    from vinsight.shortlist_check import _window, spoken_years_to_digits
+
+    assert spoken_years_to_digits("a twenty twenty one Honda Fit") == "a 2021 Honda Fit"
+    assert spoken_years_to_digits("twenty eighteen to twenty twenty") == "2018 to 2020"
+    assert spoken_years_to_digits("two thousand nineteen") == "2019"
+    assert _window("twenty eighteen to twenty twenty") == (2016, 2021)

@@ -23,6 +23,8 @@ must_haves, dealbreakers (arrays of short strings),
 shortlist (array of {"make": "Honda", "model": "Civic", "years": "2018-2020", "why": "great
 mileage"}: only models the advisor actually recommended, with the make and model spelled the
 standard way, e.g. "Subaru" / "Impreza", "Mazda" / "Mazda3", "Toyota" / "Corolla").
+The advisor speaks years as words ("twenty twenty one", "twenty eighteen"): write them as digits
+("2021", "2018") in "years", and use "2019-2021" style ranges.
 Include only keys whose value is new or changed in this exchange. Use the buyer's own words, kept
 short. Never guess: if something wasn't said, leave it out. Return {} if nothing changed."""
 
