@@ -1,131 +1,98 @@
-# VINsight
+<p align="center">
+  <img src="frontend/src/app/icon.svg" width="64" alt="VINsight logo" />
+</p>
 
-A used-car buying copilot, built for people who have never bought a car. Four personas share one
-conversation:
+<h1 align="center">VINsight</h1>
 
-- **Coach** teaches how buying a used car works: the real budget, titles, financing, inspections, scams.
-- **Scout** turns your needs into a shortlist of models, and uses NHTSA data to say which model years to avoid.
-- **Inspector** checks a specific car from its VIN or listing: a rule-based **Listing X-ray** (scam
-  patterns, title problems, VIN-vs-listing mismatch), recalls, complaints, and a BUY / CAUTION / AVOID verdict.
-- **Advisor** is a hands-free **voice call** with Sam, who learns your budget and needs and recommends
-  models. A second agent takes notes into a live "car brief", and the app checks every recommended
-  model year against NHTSA complaint data, feeding spikes back into the call.
+<p align="center">
+  <strong>Know the car before you buy it.</strong><br />
+  An AI copilot for first-time used-car buyers. It checks a car against federal safety data,
+  catches scam listings, and backs every claim with a source you can open.
+</p>
 
-Every fact about a vehicle carries a citation you can click, and the UI flags any citation that
-doesn't trace back to a tool result.
+![VINsight demo](docs/demo.gif)
 
-![VINsight demo: a VIN check that ends in CAUTION, then a scam listing caught as AVOID](docs/demo.gif)
+<p align="center"><sub>A real recording of the app, sped up. <a href="docs/demo.mp4">Watch as MP4</a></sub></p>
 
-*A real recording of the app (sped up): Inspector, a scam listing, Scout, Coach, an Advisor call, and the settings.* [MP4 version](docs/demo.mp4)
+## What it does
 
-## Status
+Four modes share one conversation, so you can move from learning to shortlisting to checking a car
+without repeating yourself.
 
-| Step | What | State |
+| Mode | For when you… | What you get |
 | --- | --- | --- |
-| 1 | VIN decode, recalls, complaints, cited text answers | ✅ done |
-| 1b | Personas (Coach / Scout / Inspector), model-year comparison, Gemini / Groq / Claude with fallback | ✅ done |
-| 1c | Streaming reasoning + answers, model picker, stop, links / PDFs / files as evidence | ✅ done |
-| 2 | Listing X-ray + rule-based verdict floor | ✅ done |
-| 2b | Voice Advisor: VAD + barge-in, Whisper + GPT-OSS on Groq, note-taker agent, background data checks | ✅ done |
-| 3 | Known-issues corpus with hybrid retrieval + reranker | planned |
-| 4 | Eval harness and report | planned |
-| 5 | Memory + price estimate | planned |
+| **Inspector** | found a car | Paste a VIN, a listing link or a PDF. A verdict (worth a look, caution or avoid) in one sentence, the recalls and complaint patterns that matter, checks for your mechanic, and questions for the seller. |
+| **Scout** | don't know what to buy | A shortlist that fits your budget and life, with the model years to avoid backed by complaint data. |
+| **Coach** | have never done this | Plain-English guidance: the real monthly cost, title types, financing, inspections, common scams. |
+| **Advisor** | would rather talk it through | A hands-free voice call with Sam. A car brief fills in as you talk, and every model he recommends is checked against NHTSA data. |
 
-The full spec is in [docs/BUILD_PROMPT.md](docs/BUILD_PROMPT.md).
+**It catches scams.** The Listing X-ray flags deposits before viewing, "I'm overseas, I'll ship it"
+sellers, gift-card payments, salvage or flood titles and more, quoting the listing. It decodes the
+VIN and compares it with the car being advertised: a 2015 Camry listing whose VIN belongs to a
+2003 Accord is caught instantly.
 
-## How it works
+## Engineering highlights
 
+- **Every fact is verifiable.** Tool results carry source IDs (recall campaigns, complaint numbers,
+  VINs). Answers cite them as footnotes, and the UI checks each citation against what the tools
+  actually returned, flagging anything the model made up.
+- **Agentic where it matters, deterministic where it doesn't.** The model decides what to look up
+  and how to answer. Steps that never change (decode a VIN, then pull its recalls and complaints;
+  X-ray an attached listing; the minimum verdict a salvage title forces) run in code. That made
+  answers faster, cheaper and more reliable than letting a model plan them.
+- **Tools are an MCP server.** Six tools behind the Model Context Protocol, usable from any MCP
+  client, not just this app.
+- **Model-agnostic, with live fallback.** GPT-OSS 120B on Groq by default, then GPT-OSS 20B, then
+  Gemini. If a model fails mid-conversation, the history is replayed into the next one and the chat
+  continues. Rate limits are shown, never waited out silently.
+- **Streams everything.** Reasoning, tool steps with timings and the answer arrive live (first
+  reasoning token in about 0.4 s on Groq), with a Stop button that cancels the work on the server.
+- **A real-time voice agent without paid infrastructure.** Voice detection runs in the browser
+  (AudioWorklet), Whisper transcribes, and replies are spoken sentence by sentence as they stream.
+  You can interrupt; echo cancellation comes from routing speech through WebRTC. A second,
+  smaller agent takes notes while code checks each recommendation against NHTSA and feeds problems
+  back into the call.
+- **Honest about its data.** NHTSA lists recalls per model, not per car, so VINsight never claims a
+  recall is open or fixed; it tells you how to check.
+- **Free to run.** One free Groq key powers everything, and visitors can bring their own keys.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  UI["Next.js app<br/>chat · voice call · X-ray"] -- "streamed events (SSE)" --> API["FastAPI"]
+  API --> Agent["Agent loop<br/>personas · prefetch · watchdog"]
+  Agent --> Router["Model router<br/>GPT-OSS 120B → 20B → Gemini"]
+  Agent -- MCP --> Tools["Tool server<br/>VIN · recalls · complaints · years<br/>listing X-ray · read link"]
+  Tools --> NHTSA[("NHTSA<br/>public APIs")]
+  API --> Voice["Voice<br/>Whisper · Orpheus"]
+  API --> Notes["Note-taker agent<br/>+ NHTSA year check"]
 ```
-Next.js UI ──SSE──▶ FastAPI ──▶ Agent loop ──────MCP/stdio──▶ VINsight MCP server ──▶ NHTSA APIs
-   personas, chat,     /api/chat     persona = prompt + tools        decode_vin                 vPIC
-   trace, citations                  Gemini → Groq backup            get_recalls                recalls
-                                                                     get_complaints             complaints
-                                                                     compare_model_years
-                                                                     analyze_listing · read_link
-```
 
-- **Tools are an MCP server** (`backend/vinsight/mcp_server.py`). Any MCP client can use them,
-  including Claude Desktop or `mcp dev`.
-- **The agent loop is hand-written** (`backend/vinsight/agent/loop.py`) so every step emits a trace
-  event with its latency. The CLI, the web UI and (soon) the eval harness all use the same trace.
-- **Model-agnostic, with a backup.** The loop talks to a small `Conversation` interface
-  (`backend/vinsight/llm/`) with Gemini, Groq and Claude adapters. Gemini is the default and falls
-  through its model list when one is overloaded or out of quota; if all fail, the conversation is
-  replayed into Groq (`gpt-oss-120b`) and continues there.
-- **Tool results are sized for the budget.** Recall and complaint text is trimmed at the source
-  (the full text is one click away on nhtsa.gov), and Groq gets an extra-compact view to fit its
-  free tier's 8K tokens/minute.
-- **Personas are a system prompt plus a tool subset** (`backend/vinsight/agent/prompts.py`). Coach
-  can't decode VINs, and the loop enforces that even if the model tries.
-- **Streams everything.** Reasoning and answers arrive token by token; the UI shows live thinking
-  that folds to "Thought for Ns", tool steps with timings, and a Stop button that cancels the run
-  server-side while keeping the conversation valid.
-- **The agent can read links itself.** `read_link` fetches a page, pulls vehicle data from its
-  schema.org markup (price, mileage, VIN, year, make, model), keeps the relevant text, and X-rays it
-  if it's a car listing, all in one tool call. Sites that block bots come back as "paste the text".
-- **Links, PDFs and files are evidence.** Pasted links become preview cards (title, image, read
-  status, any VIN found). Fetching is best-effort with an honest bot user agent and an SSRF guard;
-  sites that block bots come back as a card that says "paste the text instead". Attached text is
-  fenced as data in the prompt and cited as `[doc:id]`.
-- **Every tool result carries a `source`** (recall campaign number, complaint ODI number, VIN). The
-  system prompt requires a citation after each fact, and the UI marks each citation green
-  (returned by a tool) or red (not found).
-- **The voice call needs no LiveKit or paid service.** The browser detects speech itself (adaptive
-  energy VAD in an AudioWorklet), Whisper on Groq transcribes, GPT-OSS answers, and replies are spoken
-  as the reply streams (Groq's Orpheus voice by default, falling back to Kokoro, an open voice model
-that runs in the browser, when Groq is unavailable or over its free-tier limit).
-  Talking over Sam interrupts him. Sam has no tools, so turns stay under about a second; notes and
-  data checks run alongside, in code.
-- **Recall scope is stated honestly.** NHTSA's public API lists recalls per year/make/model, not
-  whether one is still open on a specific VIN, so VINsight never claims a recall is open or fixed.
+## Built with
 
-## Run it
+**Backend:** Python, FastAPI, a hand-written agent loop, MCP, Groq (GPT-OSS, Whisper, Orpheus),
+Gemini · **Frontend:** Next.js, React, Tailwind CSS, Web Audio, WebRTC, Kokoro (in-browser voice) ·
+**Data:** NHTSA vPIC, recalls and complaints APIs · **Testing:** pytest (offline, recorded fixtures),
+Playwright (demo)
 
-You need Python 3.11+, Node 22+, pnpm, and a free Groq API key. A Gemini key is optional.
+## Roadmap
+
+- [x] VIN decode, recalls, complaints, cited answers
+- [x] Listing X-ray with a rule-based verdict
+- [x] Scout, Coach, and the Advisor voice call
+- [x] Streaming, model switching with fallback, bring-your-own keys
+- [ ] Evals: citation validity, red-flag precision and recall, verdict accuracy on real listings
+- [ ] Known-issues search over NHTSA complaint narratives (hybrid retrieval)
+- [ ] Fair-price estimate from comparable listings
+
+## Try it
 
 ```bash
-cp .env.example .env            # add GROQ_API_KEY (free); GEMINI_API_KEY is optional
-
-# backend
-cd backend
-python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/uvicorn vinsight.api:app --reload --port 8000
-
-# frontend (second terminal)
-cd frontend
-pnpm install && pnpm dev        # http://localhost:3000
+cp .env.example .env    # add a free GROQ_API_KEY
+cd backend && python3 -m venv .venv && .venv/bin/pip install -e ".[dev]" && .venv/bin/uvicorn vinsight.api:app --port 8000
+cd frontend && pnpm install && pnpm dev    # http://localhost:3000
 ```
 
-Or with Docker: `docker compose up --build`.
-
-No server keys? Visitors can paste their own free keys under **API keys** in the sidebar. They're
-kept in the browser, sent with each request as a header, and never stored by the server.
-
-Command line, no UI:
-
-```bash
-cd backend
-.venv/bin/vinsight -p inspector "Is 1HGCM82633A004352 worth a look?"
-.venv/bin/vinsight -p coach      # interactive chat with a persona
-```
-
-## Demo recording
-
-The GIF above is recorded from the running app with Playwright, so it can be re-made whenever
-the UI changes:
-
-```bash
-cd demo && pnpm install && npx playwright install chromium
-pnpm record        # needs the app running on :3000 / :8000
-./make-gif.sh      # writes docs/demo.gif and docs/demo.mp4
-```
-
-## Tests
-
-```bash
-cd backend && .venv/bin/pytest
-```
-
-Tests run offline against recorded NHTSA responses (`backend/tests/fixtures`). The agent-loop
-tests drive the real loop and the real MCP server with a scripted stand-in for the model. They
-cover multi-step tool use, parallel tool calls, tool errors and refusals.
+Configuration, the command-line tool, tests and recording the demo are in
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
