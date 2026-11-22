@@ -70,7 +70,8 @@ Next.js UI ──SSE──▶ FastAPI ──▶ Agent loop ──────MCP
   (returned by a tool) or red (not found).
 - **The voice call needs no LiveKit or paid service.** The browser detects speech itself (adaptive
   energy VAD in an AudioWorklet), Whisper on Groq transcribes, GPT-OSS answers, and replies are spoken
-  sentence by sentence (Groq Orpheus once its terms are accepted, otherwise the browser's voice).
+  as the reply streams (Groq's Orpheus voice by default, falling back to Kokoro, an open voice model
+that runs in the browser, when Groq is unavailable or over its free-tier limit).
   Talking over Sam interrupts him. Sam has no tools, so turns stay under about a second; notes and
   data checks run alongside, in code.
 - **Recall scope is stated honestly.** NHTSA's public API lists recalls per year/make/model, not

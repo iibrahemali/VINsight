@@ -1,12 +1,35 @@
 "use client";
 
-import { Keyboard, Mic as MicIcon, MicOff, PhoneOff, Send } from "lucide-react";
+import { Cloud, Ear, EarOff, Keyboard, Laptop, Mic as MicIcon, MicOff, PhoneOff, Send } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { BriefCard, type Profile } from "@/components/BriefCard";
 import { LogoMark } from "@/components/Logo";
 import { stopSession, streamChat } from "@/lib/agent";
-import { Mic, SentenceChunker, Speaker, transcribe, voiceStatus } from "@/lib/voice";
+import {
+  Mic,
+  SentenceChunker,
+  Speaker,
+  VOICE_ENGINES,
+  isEcho,
+  kokoroReady,
+  loadKokoro,
+  onKokoro,
+  transcribe,
+  voiceStatus,
+  type KokoroState,
+  type VoiceEngine,
+} from "@/lib/voice";
+
+const VOICE_KEY = "vinsight.voice";
+
+function savedEngine(): VoiceEngine {
+  try {
+    const v = localStorage.getItem(VOICE_KEY);
+    if (v === "kokoro" || v === "groq") return v;
+  } catch {}
+  return "groq";
+}
 
 type Status = "connecting" | "listening" | "hearing" | "thinking" | "speaking" | "error";
 export type CallLine = { who: "you" | "sam"; text: string };
@@ -20,6 +43,38 @@ const STATUS_LABEL: Record<Status, string> = {
   speaking: "Sam is speaking",
   error: "Something went wrong",
 };
+
+// A round call control with a label underneath, like a phone's in-call screen.
+function Control(props: {
+  label: string;
+  sub?: string;
+  active?: boolean;
+  tone?: "bad" | "warn" | "accent";
+  title?: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  const on = { bad: "border-bad/50 bg-bad/10 text-bad", warn: "border-warn/50 bg-warn/10 text-warn", accent: "border-accent bg-accent/10 text-accent" };
+  return (
+    <div className="flex w-14 flex-col items-center gap-1.5 sm:w-16">
+      <button
+        onClick={props.onClick}
+        aria-label={props.label}
+        aria-pressed={props.active}
+        title={props.title}
+        className={`grid size-14 place-items-center rounded-full border transition-colors ${
+          props.active && props.tone ? on[props.tone] : "border-line bg-panel hover:bg-bg"
+        }`}
+      >
+        {props.children}
+      </button>
+      <span className="text-center text-[11px] leading-tight text-muted">
+        {props.label}
+        {props.sub && <span className="block text-[10px] opacity-80">{props.sub}</span>}
+      </span>
+    </div>
+  );
+}
 
 // A full-screen voice call with the advisor. Hands-free: it listens all the time, and talking over
 // Sam interrupts him (barge-in). The car brief fills in on the side as the note-taker works.
@@ -39,6 +94,10 @@ export function VoiceCall(props: {
   const [typing, setTyping] = useState(false);
   const [draft, setDraft] = useState("");
   const [seconds, setSeconds] = useState(0);
+  const [bargeIn, setBargeIn] = useState(true);
+  const [engine, setEngine] = useState<VoiceEngine>(savedEngine);
+  const [kokoro, setKokoro] = useState<KokoroState>({ status: "idle", progress: 0 });
+  const [usedEngine, setUsedEngine] = useState<VoiceEngine | null>(null);
 
   const mic = useRef<Mic | null>(null);
   const speaker = useRef<Speaker | null>(null);
@@ -46,6 +105,8 @@ export function VoiceCall(props: {
   const statusRef = useRef<Status>("connecting");
   const streaming = useRef(false);
   const heardAt = useRef(0);
+  const lastSaid = useRef(""); // Sam's latest reply, to recognise his own voice echoing back
+  const held = useRef(false); // Sam paused because the mic heard something while he talked
   const latencies = useRef<number[]>([]);
   const state = useRef({ lines: [] as CallLine[], profile: {} as Profile });
 
@@ -94,6 +155,7 @@ export function VoiceCall(props: {
           onEvent: (e) => {
             if (e.type === "text" && e.text) {
               reply += e.text;
+              lastSaid.current = reply;
               setLive({ who: "sam", text: reply });
               for (const sentence of chunker.feed(e.text)) {
                 if (firstAudio && heardAt.current) {
@@ -116,6 +178,7 @@ export function VoiceCall(props: {
       }
       if (turn.current !== ctrl) return;
       for (const sentence of chunker.flush()) speaker.current?.say(sentence);
+      speaker.current?.endTurn();
       streaming.current = false;
       turn.current = null;
       if (reply.trim()) addLine({ who: "sam", text: reply.trim() });
@@ -125,14 +188,27 @@ export function VoiceCall(props: {
     [addLine, interrupt, props.model, props.sessionId, set],
   );
 
+  useEffect(() => onKokoro(setKokoro), []);
+
+  // Switching voices mid-call applies from the next sentence.
+  useEffect(() => {
+    if (speaker.current) speaker.current.preferred = engine;
+    loadKokoro(); // the fallback voice, so it's ready if Groq can't speak
+    try {
+      localStorage.setItem(VOICE_KEY, engine);
+    } catch {}
+  }, [engine]);
+
   // Start the call: mic, voice, then have Sam say hello.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const vs = await voiceStatus().catch(() => ({ stt: false, tts: "browser" as const, tts_note: null }));
-      if (vs.tts_note) setVoiceNote(vs.tts_note);
-      speaker.current = new Speaker(vs.tts, {
-        onStart: () => statusRef.current !== "hearing" && set("speaking"),
+      const vs = await voiceStatus().catch(() => ({ stt: false, tts: "fallback" as const, tts_note: null }));
+      speaker.current = new Speaker(engine, {
+        onStart: () => {
+          setUsedEngine(speaker.current?.lastEngine ?? null);
+          if (statusRef.current !== "hearing") set("speaking");
+        },
         onIdle: () => !streaming.current && statusRef.current === "speaking" && set("listening"),
         onFallback: (note) => setVoiceNote(note),
       });
@@ -143,17 +219,37 @@ export function VoiceCall(props: {
         const m = new Mic({
           onLevel: setLevel,
           onSpeechStart: () => {
-            // Barge-in: the caller started talking, so Sam stops.
-            if (statusRef.current === "speaking" || statusRef.current === "thinking") interrupt();
+            if (statusRef.current === "speaking") {
+              // Could be the caller, or Sam's own voice leaking into the mic: pause, don't stop yet.
+              held.current = true;
+              speaker.current?.pause();
+            } else if (statusRef.current === "thinking") {
+              interrupt(); // nothing is playing, so this is the caller
+            }
             set("hearing");
+          },
+          onDiscard: () => {
+            // Too short to be speech (a cough, a click): carry on where Sam left off.
+            if (held.current) {
+              held.current = false;
+              speaker.current?.resume();
+              set("speaking");
+            } else set("listening");
           },
           onUtterance: async (wav) => {
             heardAt.current = Date.now();
             set("thinking");
             try {
               const text = await transcribe(wav);
-              if (text) ask(text);
-              else set("listening");
+              const wasHeld = held.current;
+              held.current = false;
+              if (!text || isEcho(text, lastSaid.current)) {
+                // Silence, or Sam's own voice through the speakers: resume as if nothing happened.
+                if (wasHeld) {
+                  speaker.current?.resume();
+                  set("speaking");
+                } else set(speaker.current?.busy ? "speaking" : "listening");
+              } else ask(text); // the caller really spoke: ask() stops Sam and answers
             } catch (e) {
               setError(`Couldn't transcribe: ${(e as Error).message}`);
               set("listening");
@@ -169,6 +265,8 @@ export function VoiceCall(props: {
           setTyping(true);
         }
       }
+      // Give the in-browser voice a moment to finish loading so the greeting uses it.
+      if (engine === "kokoro") await kokoroReady(20_000);
       if (!cancelled) ask("(The caller just connected. Greet them in one line and ask your first question.)", true);
     })();
     const timer = setInterval(() => setSeconds((s) => s + 1), 1000);
@@ -176,7 +274,7 @@ export function VoiceCall(props: {
       cancelled = true;
       clearInterval(timer);
       mic.current?.stop();
-      speaker.current?.stop();
+      speaker.current?.close();
       turn.current?.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once per call
@@ -203,14 +301,22 @@ export function VoiceCall(props: {
             {avg !== null && <span> · ~{(avg / 1000).toFixed(1)}s reply</span>}
           </p>
         </div>
-        <span className="ml-auto rounded-full border border-line bg-panel/60 px-2.5 py-1 text-[11px] text-muted" title={voiceNote ?? undefined}>
-          {speaker.current?.mode === "groq" ? "Natural voice" : "Browser voice"}
-        </span>
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-5 pb-4 lg:flex-row lg:items-stretch">
         <section className="flex flex-1 flex-col items-center justify-center gap-6 text-center">
-          <div className="relative grid size-48 place-items-center">
+          <button
+            type="button"
+            onClick={() => {
+              if (statusRef.current === "speaking" || statusRef.current === "thinking") {
+                interrupt();
+                set("listening");
+              }
+            }}
+            aria-label="Tap to interrupt"
+            title={status === "speaking" ? "Tap to interrupt" : undefined}
+            className="relative grid size-48 place-items-center"
+          >
             <div
               className={`absolute inset-0 rounded-full bg-accent/15 transition-transform duration-150 ${status === "speaking" ? "animate-ping-slow" : ""}`}
               style={{ transform: `scale(${ringScale})` }}
@@ -219,7 +325,7 @@ export function VoiceCall(props: {
             <div className={`relative grid size-28 place-items-center rounded-full bg-gradient-to-br from-[#2dd4bf] to-[#0f766e] shadow-2xl shadow-accent/30 ${status === "thinking" ? "animate-pulse" : ""}`}>
               <span className="text-3xl font-semibold text-white">S</span>
             </div>
-          </div>
+          </button>
           <p className={`text-[15px] font-medium ${status === "thinking" ? "shimmer" : status === "error" ? "text-bad" : ""}`}>
             {muted ? "Muted" : STATUS_LABEL[status]}
           </p>
@@ -231,7 +337,7 @@ export function VoiceCall(props: {
             ))}
           </div>
           {error && <p className="max-w-md rounded-lg bg-bad/10 px-3 py-2 text-[12px] text-bad">{error}</p>}
-          {voiceNote && speaker.current?.mode === "browser" && <p className="max-w-md text-[11px] text-muted">{voiceNote}</p>}
+          {voiceNote && <p className="max-w-md text-[11px] text-muted">{voiceNote}</p>}
         </section>
 
         <aside className="w-full shrink-0 lg:w-96">
@@ -261,31 +367,68 @@ export function VoiceCall(props: {
         </form>
       )}
 
-      <footer className="flex items-center justify-center gap-4 px-5 pb-8 pt-2">
-        <button
+      <footer className="flex items-start justify-center gap-2 px-4 pb-8 pt-2 sm:gap-5">
+        <Control
+          label={muted ? "Unmute" : "Mute"}
+          active={muted}
+          tone="bad"
           onClick={() => {
             const next = !muted;
             setMuted(next);
             if (mic.current) mic.current.muted = next;
           }}
-          aria-label={muted ? "Unmute" : "Mute"}
-          className={`grid size-14 place-items-center rounded-full border ${muted ? "border-bad/50 bg-bad/10 text-bad" : "border-line bg-panel"}`}
         >
           {muted ? <MicOff size={20} /> : <MicIcon size={20} />}
-        </button>
-        <button onClick={hangUp} aria-label="End call" className="grid size-16 place-items-center rounded-full bg-[#dc2626] text-white shadow-lg transition-transform hover:scale-105">
-          <PhoneOff size={22} />
-        </button>
-        <button
-          onClick={() => setTyping((t) => !t)}
-          aria-label="Type instead"
-          aria-pressed={typing}
-          className={`grid size-14 place-items-center rounded-full border ${typing ? "border-accent text-accent" : "border-line bg-panel"}`}
+        </Control>
+        <Control
+          label="Interrupt"
+          sub={bargeIn ? "by voice" : "tap orb"}
+          active={!bargeIn}
+          tone="warn"
+          title={bargeIn ? "Talk over Sam to interrupt. Turn off if he keeps cutting himself off on speakers." : "Voice interrupt is off: tap the orb to interrupt."}
+          onClick={() => {
+            const next = !bargeIn;
+            setBargeIn(next);
+            if (mic.current) mic.current.bargeIn = next;
+          }}
         >
+          {bargeIn ? <Ear size={20} /> : <EarOff size={20} />}
+        </Control>
+
+        <div className="flex flex-col items-center gap-1.5">
+          <button
+            onClick={hangUp}
+            aria-label="End call"
+            className="grid size-16 place-items-center rounded-full bg-[#dc2626] text-white shadow-lg transition-transform hover:scale-105"
+          >
+            <PhoneOff size={22} />
+          </button>
+          <span className="text-[11px] text-muted">End</span>
+        </div>
+
+        <Control
+          label="Voice"
+          sub={
+            engine === "groq"
+              ? usedEngine === "kokoro"
+                ? "Groq · on backup"
+                : "Groq"
+              : kokoro.status === "loading"
+                ? `Browser · ${kokoro.progress}%`
+                : "Browser"
+          }
+          title={`${VOICE_ENGINES.find((v) => v.id === engine)?.detail} Click to switch.`}
+          onClick={() => setEngine(engine === "groq" ? "kokoro" : "groq")}
+        >
+          {engine === "groq" ? <Cloud size={20} /> : <Laptop size={20} />}
+        </Control>
+        <Control label="Type" active={typing} tone="accent" onClick={() => setTyping((t) => !t)}>
           <Keyboard size={20} />
-        </button>
+        </Control>
       </footer>
-      <p className="pb-4 text-center text-[11px] text-muted">Talk any time. You can interrupt Sam. Headphones work best.</p>
+      <p className="pb-4 text-center text-[11px] text-muted">
+        {bargeIn ? "Talk any time to interrupt Sam. On speakers? Use headphones, or turn off voice interrupt." : "Voice interrupt is off. Tap the orb to interrupt Sam."}
+      </p>
     </div>
   );
 }
