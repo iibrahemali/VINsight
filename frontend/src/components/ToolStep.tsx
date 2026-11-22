@@ -1,4 +1,4 @@
-import { CalendarRange, Check, FileWarning, Loader2, MessageSquareWarning, ScanLine, ScanSearch, X } from "lucide-react";
+import { CalendarRange, Check, FileWarning, Globe, Loader2, MessageSquareWarning, ScanLine, ScanSearch, X } from "lucide-react";
 
 import type { TraceEvent } from "@/lib/agent";
 
@@ -22,6 +22,17 @@ const TOOLS: Record<string, { running: string; done: string; icon: typeof ScanLi
     done: "Complaints",
     icon: MessageSquareWarning,
     summary: (o) => `${Number(o.total ?? 0).toLocaleString()} filed`,
+  },
+  read_link: {
+    running: "Reading the link",
+    done: "Read link",
+    icon: Globe,
+    summary: (o) =>
+      o.status === "ok"
+        ? [o.site, o.title].filter(Boolean).join(" · ")
+        : o.status === "partial"
+          ? `preview only · ${o.title ?? o.site}`
+          : `${o.site ?? "site"} blocked bots: paste the text instead`,
   },
   analyze_listing: {
     running: "X-raying the listing",

@@ -21,11 +21,11 @@ export function Answer({ text, verified, streaming = false }: { text: string; ve
             const [kind, encoded] = href.slice("cite:".length).split("/");
             const id = decodeURIComponent(encoded ?? "");
             const ok = verified.has(citationKey(kind, id));
-            const label = kind === "doc" ? "attached" : `${kind}:${id}`;
+            const label = kind === "doc" ? "attached" : kind === "link" ? "web page" : `${kind}:${id}`;
             const url = citationUrl(kind, id);
             const chip = (
               <span
-                title={ok ? (kind === "doc" ? "From a document you attached" : "Returned by a tool in this conversation") : "Not found in any tool result"}
+                title={ok ? (kind === "doc" ? "From a document you attached" : kind === "link" ? "From a web page read in this conversation" : "Returned by a tool in this conversation") : "Not found in any tool result"}
                 className={`mx-0.5 inline-flex items-center gap-1 rounded-md border px-1.5 py-px align-baseline font-mono text-[11px] ${
                   ok ? "border-ok/40 text-ok" : "border-bad/50 text-bad"
                 }`}

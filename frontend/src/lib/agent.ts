@@ -163,8 +163,9 @@ export function sourceIds(events: TraceEvent[], attachmentIds: string[] = []): S
     else if (v && typeof v === "object") {
       const o = v as Record<string, unknown>;
       if (o.source && typeof o.source === "object") {
-        const s = o.source as { type: string; id: string };
+        const s = o.source as { type: string; id: string; url?: string };
         ids.add(`${s.type}:${s.id}`.toLowerCase());
+        if (s.type === "link" && s.url) linkUrls.set(s.id.toLowerCase(), s.url);
       }
       // Year comparisons list recall campaigns without a source object each.
       if (Array.isArray(o.recall_campaigns)) {
@@ -184,6 +185,7 @@ const CITE_TYPES: Record<string, string> = {
   complaints: "nhtsa_complaint",
   years: "nhtsa_complaint",
   doc: "doc",
+  link: "link",
 };
 
 export function citationKey(kind: string, id: string): string {
@@ -192,7 +194,11 @@ export function citationKey(kind: string, id: string): string {
   return `${CITE_TYPES[kind] ?? kind}:${sourceId}`.toLowerCase();
 }
 
+// read_link results map their short id to the page URL, so [link:id] chips can open the page.
+const linkUrls = new Map<string, string>();
+
 export function citationUrl(kind: string, id: string): string | undefined {
+  if (kind === "link") return linkUrls.get(id.toLowerCase());
   if (kind === "recall") return `https://www.nhtsa.gov/recalls?nhtsaId=${id}`;
   if (kind === "vpic") return `https://vpic.nhtsa.dot.gov/decoder/Decoder?VIN=${id}`;
   if (kind === "complaints" || kind === "years") {
@@ -206,7 +212,7 @@ export function citationUrl(kind: string, id: string): string | undefined {
 // Turn "[recall:19V182000]" into a markdown link with a cite: scheme the renderer styles as a chip.
 export function linkCitations(markdown: string): string {
   // Model names can contain spaces ("Grand Cherokee"), so the id is URI-encoded inside the link.
-  return markdown.replace(/\[(vpic|recalls?|complaints?|years|doc):([^\]\n]+)\]/g, (_, kind: string, id: string) => {
+  return markdown.replace(/\[(vpic|recalls?|complaints?|years|doc|link):([^\]\n]+)\]/g, (_, kind: string, id: string) => {
     const k = kind === "recalls" ? "recall" : kind;
     return `[${k}:${id}](cite:${k}/${encodeURIComponent(id.trim())})`;
   });

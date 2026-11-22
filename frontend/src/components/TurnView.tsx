@@ -100,6 +100,9 @@ export function TurnView({ turn, verified }: { turn: Turn; verified: Set<string>
                   {b.name === "analyze_listing" && b.result?.ok && b.result.output != null && (
                     <ListingXray x={b.result.output as Xray} />
                   )}
+                  {b.name === "read_link" && b.result?.ok && (b.result.output as { listing?: Xray })?.listing && (
+                    <ListingXray x={(b.result.output as { listing: Xray }).listing} />
+                  )}
                 </div>
               );
             case "text": {
