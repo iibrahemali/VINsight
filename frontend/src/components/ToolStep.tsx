@@ -60,7 +60,9 @@ export function ToolStep({ name, input, result, live }: { name: string; input?: 
   const pending = !result;
   const ok = result?.ok ?? true;
   const output = result?.output && typeof result.output === "object" ? (result.output as Out) : null;
-  const detail = pending ? Object.values(input ?? {}).join(" · ") : ok && output ? spec.summary(output) : String(result?.output ?? "");
+  // Tool errors arrive as "Error executing tool <name>: <reason>"; the reason is what matters.
+  const error = String(result?.output ?? "").replace(/^Error executing tool \w+:\s*/, "");
+  const detail = pending ? Object.values(input ?? {}).join(" · ") : ok && output ? spec.summary(output) : error;
 
   return (
     <div className="flex items-center gap-2.5 text-[13px]">

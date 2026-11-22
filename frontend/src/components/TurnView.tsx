@@ -137,8 +137,8 @@ export function TurnView({ turn, verified }: { turn: Turn; verified: Set<string>
             }
             case "notice":
               return (
-                <p key={i} className="flex items-start gap-2 rounded-lg bg-accent/10 px-3 py-2 text-[12px] text-accent">
-                  <ArrowRightLeft size={13} className="mt-0.5 shrink-0" /> {b.text}
+                <p key={i} className="flex items-start gap-1.5 text-[12px] text-muted">
+                  <ArrowRightLeft size={12} className="mt-0.5 shrink-0" /> {b.text}
                 </p>
               );
             case "error":
