@@ -181,7 +181,7 @@ async def chat(req: ChatRequest, request: Request) -> StreamingResponse:
         Prefetch(name="analyze_listing", input={"text": item.text[: attachments.PROMPT_CHARS]},
                  shown_input={"text": f"[text of attached document {item.id}]"})
         for item in items[:2]
-        if req.persona == "inspector" and item.status == "ok" and item.text
+        if req.persona == "inspector" and item.status in ("ok", "partial") and item.text
     ]
     queue: asyncio.Queue = asyncio.Queue()
 

@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-SourceType = Literal["nhtsa_vpic", "nhtsa_recall", "nhtsa_complaint", "listing", "corpus", "estimate"]
+SourceType = Literal["nhtsa_vpic", "nhtsa_recall", "nhtsa_complaint", "listing", "link", "corpus", "estimate"]
 Verdict = Literal["AVOID", "CAUTION", "NONE"]
 
 
@@ -177,3 +177,20 @@ class BuyerProfile(BaseModel):
     experience: str | None = Field(None, description="First car? Comfortable with manual? Mechanically handy?")
     timeline: str | None = None
     shortlist: list[ShortlistEntry] = []
+
+
+class LinkReading(BaseModel):
+    """What read_link found on a web page."""
+
+    url: str
+    site: str | None
+    title: str | None
+    status: Literal["ok", "partial", "blocked", "empty"] = Field(
+        description='"partial": only the link preview (title, summary) was readable; use it and ask for the full text.'
+    )
+    note: str | None = Field(None, description="Why the page couldn't be fully read, and what to do instead.")
+    structured: dict = Field({}, description="Vehicle details from the page's schema.org data, when present.")
+    text: str = Field("", description="Readable page text, focused on `focus` when given, trimmed.")
+    truncated: bool = False
+    listing: ListingAnalysis | None = Field(None, description="Red-flag X-ray, when the page is a car listing.")
+    source: Source

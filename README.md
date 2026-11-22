@@ -39,6 +39,7 @@ Next.js UI ──SSE──▶ FastAPI ──▶ Agent loop ──────MCP
    trace, citations                  Gemini → Groq backup            get_recalls                recalls
                                                                      get_complaints             complaints
                                                                      compare_model_years
+                                                                     analyze_listing · read_link
 ```
 
 - **Tools are an MCP server** (`backend/vinsight/mcp_server.py`). Any MCP client can use them,
@@ -57,6 +58,9 @@ Next.js UI ──SSE──▶ FastAPI ──▶ Agent loop ──────MCP
 - **Streams everything.** Reasoning and answers arrive token by token; the UI shows live thinking
   that folds to "Thought for Ns", tool steps with timings, and a Stop button that cancels the run
   server-side while keeping the conversation valid.
+- **The agent can read links itself.** `read_link` fetches a page, pulls vehicle data from its
+  schema.org markup (price, mileage, VIN, year, make, model), keeps the relevant text, and X-rays it
+  if it's a car listing, all in one tool call. Sites that block bots come back as "paste the text".
 - **Links, PDFs and files are evidence.** Pasted links become preview cards (title, image, read
   status, any VIN found). Fetching is best-effort with an honest bot user agent and an SSRF guard;
   sites that block bots come back as a card that says "paste the text instead". Attached text is

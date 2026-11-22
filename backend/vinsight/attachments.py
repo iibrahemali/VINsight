@@ -7,6 +7,7 @@ back as a card that says so, and the user can paste the listing text instead.
 import asyncio
 import io
 import ipaddress
+import json
 import re
 import socket
 import uuid
@@ -43,9 +44,11 @@ class Attachment:
     description: str | None = None
     image: str | None = None
     pages: int | None = None
-    status: Literal["ok", "blocked", "empty"] = "ok"
+    # "partial": the site only gave bots a preview (title, summary, image), not the full page.
+    status: Literal["ok", "partial", "blocked", "empty"] = "ok"
     note: str | None = None
     vins: list[str] = field(default_factory=list)
+    structured: dict = field(default_factory=dict)  # vehicle details from the page's schema.org data
 
     def card(self) -> dict:
         """What the UI shows: everything but the full text."""
@@ -61,7 +64,9 @@ class Attachment:
         if self.url:
             head += f' url="{self.url}"'
         body = self.text[:PROMPT_CHARS] + ("\n[…truncated]" if len(self.text) > PROMPT_CHARS else "")
-        if self.status != "ok":
+        if self.status == "partial":
+            body = f"[Preview only: {self.note}]\n{body}"
+        elif self.status != "ok":
             body = f"[Could not read this {self.kind}: {self.note}]"
         return f"{head}>\n{body}\n</document>"
 
@@ -124,6 +129,68 @@ def from_upload(data: bytes, filename: str, content_type: str | None) -> Attachm
     raise AttachmentError("supported files: PDF, TXT, MD, CSV, HTML")
 
 
+_VEHICLE_TYPES = {"car", "vehicle", "motorvehicle", "product", "individualproduct", "offer", "busorcoach"}
+
+
+def _ld_objects(value):
+    """Flatten JSON-LD into its objects (handles lists and @graph)."""
+    if isinstance(value, list):
+        for v in value:
+            yield from _ld_objects(v)
+    elif isinstance(value, dict):
+        yield value
+        yield from _ld_objects(value.get("@graph", []))
+
+
+def _name(value) -> str | None:
+    if isinstance(value, dict):
+        value = value.get("name") or value.get("value")
+    if isinstance(value, list):
+        value = value[0] if value else None
+    return str(value).strip() if value not in (None, "") else None
+
+
+def json_ld_vehicle(soup: BeautifulSoup) -> dict:
+    """Vehicle facts from schema.org JSON-LD, which many dealer and listing sites embed for search
+    engines. More reliable than scraping the visible text when it's there."""
+    found: dict = {}
+    for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        try:
+            data = json.loads(script.string or "")
+        except (json.JSONDecodeError, TypeError):
+            continue
+        for obj in _ld_objects(data):
+            types = obj.get("@type", [])
+            types = {t.lower() for t in (types if isinstance(types, list) else [types]) if isinstance(t, str)}
+            if not types & _VEHICLE_TYPES:
+                continue
+            offer = obj.get("offers") or (obj if "offer" in types else {})
+            if isinstance(offer, list):
+                offer = offer[0] if offer else {}
+            mileage = obj.get("mileageFromOdometer")
+            fields = {
+                "name": _name(obj.get("name")),
+                "make": _name(obj.get("brand") or obj.get("manufacturer")),
+                "model": _name(obj.get("model")),
+                "year": _name(obj.get("vehicleModelDate") or obj.get("modelDate") or obj.get("productionDate")),
+                "vin": _name(obj.get("vehicleIdentificationNumber")),
+                "mileage": _name(mileage),
+                "mileage_unit": _name(mileage.get("unitCode")) if isinstance(mileage, dict) else None,
+                "price": _name(offer.get("price")) if isinstance(offer, dict) else None,
+                "currency": _name(offer.get("priceCurrency")) if isinstance(offer, dict) else None,
+                "condition": _name(obj.get("itemCondition")),
+                "body": _name(obj.get("bodyType")),
+                "engine": _name(obj.get("vehicleEngine")),
+                "transmission": _name(obj.get("vehicleTransmission")),
+                "color": _name(obj.get("color")),
+                "seller": _name(offer.get("seller")) if isinstance(offer, dict) else None,
+            }
+            for key, value in fields.items():
+                if value and key not in found:
+                    found[key] = value.rsplit("/", 1)[-1] if key == "condition" else value
+    return found
+
+
 def _from_html(html: str, name: str, url: str | None) -> Attachment:
     soup = BeautifulSoup(html, "html.parser")
 
@@ -138,13 +205,14 @@ def _from_html(html: str, name: str, url: str | None) -> Attachment:
     description = meta("og:description", "description", "twitter:description")
     image = meta("og:image", "twitter:image")
     site = meta("og:site_name")
+    structured = json_ld_vehicle(soup)  # before scripts are stripped below
     for tag in soup(["script", "style", "noscript", "svg", "nav", "footer", "header", "form", "iframe"]):
         tag.decompose()
     text = _clean_text(soup.get_text("\n"))
     if url and image:
         image = urljoin(url, image)
     return Attachment(id=_new_id(), kind="link" if url else "text", name=name, url=url, title=title,
-                      description=description, image=image, site=site, text=text)
+                      description=description, image=image, site=site, text=text, structured=structured)
 
 
 async def _check_public(url: str) -> None:
@@ -203,10 +271,30 @@ async def from_url(url: str, client: httpx.AsyncClient | None = None) -> Attachm
     item = _from_html(bytes(data).decode("utf-8", errors="replace"), name=site, url=url)
     item.site = item.site or site
     if len(item.text) < 200:
-        # Typical of JavaScript-only pages and bot walls (Facebook Marketplace, many dealer sites).
-        item.status = "blocked" if len(item.text) < 40 else "empty"
-        item.note = f"{site} didn't return readable text to a bot. Paste the listing text instead."
+        # JavaScript-only pages and bot walls (Facebook Marketplace, many dealer sites) still serve a
+        # link preview: title, summary, image, sometimes structured data. Keep that rather than
+        # throwing it away: "2010 BMW 328i" alone is enough to look up recalls.
+        preview = preview_text(item)
+        if preview:
+            item.text = preview
+            item.status = "partial"
+            item.note = f"{site} only shows bots a preview (title and summary). Paste the full listing text for a complete check."
+        else:
+            item.status = "blocked" if len(item.text) < 40 else "empty"
+            item.note = f"{site} didn't return readable text to a bot. Paste the listing text instead."
     return item
+
+
+def preview_text(item: Attachment) -> str:
+    """The link-preview parts of a page, as text: title, summary and any structured vehicle data."""
+    parts = [item.title, item.description, *(f"{k}: {v}" for k, v in item.structured.items()), item.text]
+    seen: list[str] = []
+    for p in parts:
+        p = (p or "").strip()
+        if p and not any(p in s for s in seen):
+            seen.append(p)
+    text = "\n".join(seen)
+    return text if (item.title or item.description or item.structured) else ""
 
 
 def _blocked(url: str, site: str, note: str) -> Attachment:

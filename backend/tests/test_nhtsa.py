@@ -66,7 +66,7 @@ async def test_compare_model_years_caps_the_span():
 async def test_mcp_server_exposes_tools_and_readable_errors():
     async with Client(server) as mcp:
         names = {t.name for t in (await mcp.list_tools()).tools}
-        assert names == {"decode_vin", "get_recalls", "get_complaints", "compare_model_years", "analyze_listing"}
+        assert names == {"decode_vin", "get_recalls", "get_complaints", "compare_model_years", "analyze_listing", "read_link"}
 
         ok = await mcp.call_tool("decode_vin", {"vin": VIN})
         assert not ok.is_error and ok.structured_content["model"] == "Accord"
