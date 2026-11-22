@@ -84,7 +84,13 @@ export default function Home() {
         sessionId: sessionId.current,
         signal: ctrl.signal,
         onSession: (id) => (sessionId.current = id),
-        onEvent: (event) => update((turn) => ({ ...turn, events: [...turn.events, event] })),
+        onEvent: (event) => {
+          // "done" means the answer is complete: finish the turn now rather than waiting for the
+          // connection to close, so a proxy that holds it open can never freeze the UI.
+          const finished = event.type === "done";
+          update((turn) => ({ ...turn, events: [...turn.events, event], pending: finished ? false : turn.pending }));
+          if (finished) setTimeout(() => ctrl.abort(), 0);
+        },
       });
     } catch (err) {
       if (!ctrl.signal.aborted) {

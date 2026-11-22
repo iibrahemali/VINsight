@@ -58,6 +58,9 @@ export class Mic {
     this.node = new AudioWorkletNode(this.ctx, "tap");
     this.node.port.onmessage = (e) => this.frame(e.data as Float32Array);
     this.ctx.createMediaStreamSource(this.stream).connect(this.node);
+    // An AudioContext created after an await can start "suspended" under autoplay rules, and then
+    // the mic is silently never processed. Resume it explicitly.
+    await this.ctx.resume().catch(() => {});
   }
 
   private frame(samples: Float32Array) {

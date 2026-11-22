@@ -59,6 +59,31 @@ class LLMError(RuntimeError):
         self.partial = partial
 
 
+def _kind(error: Exception) -> str:
+    text = str(error).lower()
+    if any(k in text for k in ("429", "rate limit", "rate-limit", "quota", "resource_exhausted", "413")):
+        return "limit"
+    if "timed out" in text or "timeout" in text:
+        return "timeout"
+    return "other"
+
+
+def short_reason(error: Exception) -> str:
+    """A few words for why a model failed, for user-facing notices (details go to the log)."""
+    return {"limit": "is over its free-tier limit", "timeout": "didn't respond in time"}.get(_kind(error), "is unavailable right now")
+
+
+def friendly_error(error: Exception) -> str:
+    """What to tell the user when no model could answer."""
+    kind = _kind(error)
+    if kind == "limit":
+        return ("Every model is over its free-tier limit right now. Wait a minute and try again, "
+                "or add your own free API key under API keys.")
+    if kind == "timeout":
+        return "The model didn't respond in time. Please try again."
+    return "The model couldn't answer this time. Please try again."
+
+
 class Conversation(Protocol):
     def add_user(self, text: str) -> None: ...
 

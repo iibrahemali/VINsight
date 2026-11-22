@@ -7,6 +7,7 @@ streams: thinking and answer text reach the UI token by token.
 """
 
 import asyncio
+import logging
 import sys
 import time
 from collections.abc import AsyncIterator
@@ -18,6 +19,9 @@ from pydantic import BaseModel
 from vinsight.agent.prompts import DEFAULT_PERSONA, PERSONAS
 from vinsight.config import settings
 from vinsight.llm import Conversation, ConversationRouter, LLMError, Step, ToolCall, ToolResult, ToolSpec, new_conversation
+from vinsight.llm.base import friendly_error
+
+log = logging.getLogger(__name__)
 
 
 class TraceEvent(BaseModel):
@@ -136,15 +140,22 @@ class Agent:
                 t0 = time.perf_counter()
                 step: Step | None = None
                 try:
-                    async for item in self.conversation.stream(p.system_prompt, allowed, p.effort):
-                        if isinstance(item, Step):
-                            step = item
-                        elif item.kind == "notice":
-                            yield TraceEvent(type="notice", turn=turn, text=item.text)
-                        else:
-                            yield TraceEvent(type="thinking" if item.kind == "thought" else "text", turn=turn, text=item.text)
+                    # Watchdog: a stalled stream must end the turn with a message, never hang it.
+                    async with asyncio.timeout(settings.step_timeout_s):
+                        async for item in self.conversation.stream(p.system_prompt, allowed, p.effort):
+                            if isinstance(item, Step):
+                                step = item
+                            elif item.kind == "notice":
+                                yield TraceEvent(type="notice", turn=turn, text=item.text)
+                            else:
+                                yield TraceEvent(type="thinking" if item.kind == "thought" else "text", turn=turn, text=item.text)
+                except TimeoutError:
+                    log.warning("model step timed out after %ss", settings.step_timeout_s)
+                    yield TraceEvent(type="error", turn=turn, text="The model took too long to answer. Please try again.", ok=False)
+                    return
                 except LLMError as e:
-                    yield TraceEvent(type="error", turn=turn, text=str(e), ok=False, persona=p.id)
+                    log.warning("no model could answer: %s", e)
+                    yield TraceEvent(type="error", turn=turn, text=friendly_error(e), ok=False, persona=p.id)
                     return
                 assert step is not None, "provider stream ended without a Step"
                 model = step.model or model

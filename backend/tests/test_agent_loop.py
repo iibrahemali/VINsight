@@ -149,3 +149,18 @@ async def test_vin_lookups_run_in_code_before_the_model():
     calls = [e.name for e in events if e.type == "tool_call"]
     assert calls == ["decode_vin", "get_recalls", "get_complaints"]
     assert len(convo.requests) == 1  # the model answered in a single step
+
+
+async def test_a_stalled_model_step_ends_the_turn(monkeypatch):
+    from vinsight.agent import loop
+
+    monkeypatch.setattr(loop.settings, "step_timeout_s", 0.05)
+
+    class Stalled(ScriptedConversation):
+        async def stream(self, system, tools, effort=None):
+            await asyncio.sleep(10)
+            yield Step()
+
+    async with ToolBox(server) as tools:
+        events = [e async for e in Agent(tools, Stalled([])).run("hi", "coach")]
+    assert [e.type for e in events] == ["error"] and "too long" in events[0].text

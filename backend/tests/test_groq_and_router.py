@@ -163,3 +163,14 @@ async def test_groq_long_rate_limit_moves_on_without_waiting():
     convo.add_user("hi")
     items = [i async for i in convo.stream("sys", [])]
     assert [c["model"] for c in client.calls] == ["a", "b"] and not any(getattr(i, "kind", "") == "notice" for i in items)
+
+
+async def test_failure_notices_are_short_and_friendly():
+    router = ConversationRouter(
+        {"gemini": lambda: Scripted(fail=LLMError("429 RESOURCE_EXHAUSTED {'error': {...a very long json...}}")),
+         "groq": lambda: Scripted([Step(texts=["hi"])])},
+        active="gemini",
+    )
+    router.add_user("hi")
+    notice = (await drain(router))[0].text
+    assert notice == "Gemini is over its free-tier limit. Switched to GPT-OSS." and "{" not in notice

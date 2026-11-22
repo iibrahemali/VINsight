@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     # Takes over for the rest of a conversation when the active model fails. "none" disables it.
     vinsight_backup_provider: str = "gemini"
     vinsight_max_turns: int = 12
+    step_timeout_s: float = 120.0  # one model step (including fallbacks) may not take longer than this
 
     # Gemini: models are tried in order; later ones are fallbacks when earlier ones are overloaded.
     gemini_api_key: str | None = None

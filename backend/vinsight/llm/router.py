@@ -7,9 +7,12 @@ provider wrote itself stay native only while it remains active; after a switch, 
 replayed through `add_model_turn` (natively for Groq/Claude, as text for Gemini).
 """
 
+import logging
 from collections.abc import Callable
 
-from vinsight.llm.base import Conversation, Delta, LLMError, Replayable, Step, ToolResult, ToolSpec
+from vinsight.llm.base import Conversation, Delta, LLMError, Replayable, Step, ToolResult, ToolSpec, short_reason
+
+log = logging.getLogger(__name__)
 
 
 class ConversationRouter:
@@ -71,8 +74,9 @@ class ConversationRouter:
             if e.partial or backup is None:
                 raise
             failed = self.active
+            log.warning("model %s failed, switching to %s: %s", failed, backup, e)
             self.use(backup)
-            yield Delta("notice", f"{self._labels.get(failed, failed)} is unavailable right now ({e}). "
+            yield Delta("notice", f"{self._labels.get(failed, failed)} {short_reason(e)}. "
                                   f"Switched to {self._labels.get(backup, backup)}.")
         async for item in self._convo.stream(system, tools, effort):
             if isinstance(item, Step):
