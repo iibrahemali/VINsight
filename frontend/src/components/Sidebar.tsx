@@ -4,6 +4,7 @@ import { Settings, SquarePen, X } from "lucide-react";
 
 import { Logo } from "@/components/Logo";
 import { PersonaIcon } from "@/components/PersonaIcon";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { PERSONAS, type PersonaId } from "@/lib/agent";
 
 export function Sidebar(props: {
@@ -71,6 +72,9 @@ export function Sidebar(props: {
         >
           <Settings size={15} /> API keys
         </button>
+        <div className="mt-2 px-2">
+          <ThemeToggle />
+        </div>
         <p className="mt-2 px-2 text-[11px] leading-relaxed text-muted">Data from NHTSA. Open source and free to run.</p>
       </aside>
     </>

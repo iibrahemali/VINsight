@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
 :root {
+  color-scheme: light;
   --bg: #f6f7f6;
   --panel: #ffffff;
   --ink: #141417;
@@ -12,8 +13,10 @@
   --bad: #b91c1c;
 }
 
+/* Dark palette: used when the system is dark (unless the user picked Light), or when Dark is picked. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --bg: #0b0d0e;
     --panel: #131618;
     --ink: #eceef0;
@@ -24,6 +27,19 @@
     --warn: #fbbf24;
     --bad: #f87171;
   }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0b0d0e;
+  --panel: #131618;
+  --ink: #eceef0;
+  --muted: #8f959c;
+  --line: #23282c;
+  --accent: #2dd4bf;
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --bad: #f87171;
 }
 
 @theme inline {
