@@ -20,6 +20,7 @@ MAKES = {
     "toyota", "volkswagen", "vw", "volvo", "scion", "saturn", "pontiac", "mercury", "suzuki", "saab", "hummer",
 }
 MAKE_ALIASES = {"chevy": "chevrolet", "vw": "volkswagen", "mercedes": "mercedes-benz"}
+MAKE_DISPLAY = {"bmw": "BMW", "gmc": "GMC", "mini": "MINI", "ram": "RAM"}  # acronyms, not title case
 
 # (code, severity, label, pattern, why). Severity "high" forces AVOID, "medium" forces CAUTION.
 RULES: list[tuple[str, str, str, str, str]] = [
@@ -125,7 +126,8 @@ def extract(text: str) -> ListingAnalysis:
     for m in _YMM_RE.finditer(text):
         candidate = m.group(2).lower()
         if candidate in MAKES:
-            year, make, model = int(m.group(1)), MAKE_ALIASES.get(candidate, candidate).title(), m.group(3)
+            canonical = MAKE_ALIASES.get(candidate, candidate)
+            year, make, model = int(m.group(1)), MAKE_DISPLAY.get(canonical, canonical.title()), m.group(3)
             break
 
     if year and miles is not None:
