@@ -1,0 +1,22 @@
+services:
+  backend:
+    build: ./backend
+    # Pass keys explicitly rather than via env_file, so host-only settings in .env stay on the host.
+    environment:
+      VINSIGHT_PROVIDER: ${VINSIGHT_PROVIDER:-gemini}
+      VINSIGHT_BACKUP_PROVIDER: ${VINSIGHT_BACKUP_PROVIDER:-groq}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        BACKEND_URL: http://backend:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend

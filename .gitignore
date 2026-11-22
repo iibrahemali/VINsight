@@ -1,0 +1,15 @@
+.env
+.DS_Store
+__pycache__/
+*.egg-info/
+.venv/
+.pytest_cache/
+node_modules/
+.next/
+*.tsbuildinfo
+
+# Screenshots (macOS defaults and a screenshots/ folder)
+screenshots/
+Screenshot*.png
+Screen Shot*.png
+*.screenshot.png

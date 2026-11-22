@@ -1,0 +1,39 @@
+[project]
+name = "vinsight"
+version = "0.1.0"
+description = "Used-car buying copilot: an agent that decides whether a used car is worth buying, with cited evidence."
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=2.12",
+    "google-genai>=3.6",
+    "groq>=1.7",
+    "pypdf>=7",
+    "beautifulsoup4>=4.12",
+    "python-multipart>=0.0.20",
+    "mcp[cli]>=2.3",
+    "httpx>=0.28",
+    "pydantic>=2.10",
+    "pydantic-settings>=2.6",
+    "rich>=13",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.24"]
+
+[project.scripts]
+vinsight = "vinsight.cli:main"
+vinsight-mcp = "vinsight.mcp_server:main"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["vinsight*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
