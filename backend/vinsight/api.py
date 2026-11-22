@@ -224,7 +224,13 @@ async def chat(req: ChatRequest, request: Request) -> StreamingResponse:
             if session.task and not session.task.done():
                 session.task.cancel()
 
-    return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+    # no-transform: stops proxies (including the Next.js dev server) from gzipping the stream, which
+    # buffers it until the end. X-Accel-Buffering: same for nginx when deployed.
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
+    )
 
 
 class StopRequest(BaseModel):
