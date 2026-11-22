@@ -4,7 +4,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 mkdir -p ../docs out/parts
 # scene:speed, in playback order. Scenes that weren't recorded are skipped.
-SCENES="vin:1.6 listing:1.6 scout:2.2 coach:1.6 advisor:2.4 tour:1.3"
+# Inspector (the main feature) plays slower so the verdict and sources are readable; the rest is a quick montage.
+SCENES="vin:1.1 listing:1.1 scout:1.8 coach:1.8 advisor:1.8 tour:1.4"
 : > out/parts.txt
 for entry in $SCENES; do
   name=${entry%%:*}; speed=${entry##*:}

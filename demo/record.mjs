@@ -64,7 +64,17 @@ async function sceneWithRetry(browser, name, run, extra) {
 
 const stopButton = (page) => page.getByRole("button", { name: "Stop" });
 
+// DEMO_MODEL picks a model in the composer's picker first (e.g. "Qwen 3.8 27B" when other quotas are spent).
+async function pickModel(page) {
+  const label = process.env.DEMO_MODEL;
+  if (!label) return;
+  await page.getByRole("button", { name: /GPT-OSS 120B|Gemini|Qwen|GPT-OSS 20B/ }).first().click();
+  await page.getByRole("option", { name: new RegExp(label) }).click();
+  await page.waitForTimeout(300);
+}
+
 async function type(page, text) {
+  await pickModel(page);
   const box = page.getByRole("textbox").first();
   await box.click();
   await box.pressSequentially(text, { delay: 22 });
@@ -120,8 +130,10 @@ const SCENES = {
     await mode(page, "Advisor").click();
     await page.waitForTimeout(600);
     await page.getByRole("button", { name: "Start call" }).click();
-    await page.getByText(/Sam is speaking|Listening/).first().waitFor({ timeout: 60_000 });
-    await page.waitForTimeout(1500); // the greeting
+    // Wait for Sam's greeting caption (a question), not the voice status: on free tiers the voice
+    // can fall back or be unavailable, but the captions always appear.
+    await page.waitForFunction(() => /\?/.test(document.querySelector("div.fixed.inset-0")?.textContent ?? ""), null, { timeout: 60_000 });
+    await page.waitForTimeout(1500);
     await page.getByRole("button", { name: "Type" }).click();
     const say = async (text) => {
       const input = page.getByPlaceholder("Type to Sam…");
@@ -131,9 +143,16 @@ const SCENES = {
     await say("About $12k. I drive 40 miles a day, mostly highway, and it snows here.");
     await page.getByText("Budget", { exact: true }).waitFor({ timeout: 60_000 }); // the note-taker filled the brief
     await page.waitForTimeout(2500);
-    await say("Just me. I want good gas mileage. What would you recommend?");
+    await say("Just me, good gas mileage, no must-haves. That's everything: please recommend two or three models now.");
     // exact: the Advisor's tagline on the page behind the call also says "shortlist".
-    await page.getByText("Shortlist", { exact: true }).waitFor({ timeout: 120_000 });
+    const shortlist = page.getByText("Shortlist", { exact: true });
+    try {
+      await shortlist.waitFor({ timeout: 40_000 });
+    } catch {
+      // Sam sometimes asks one more question first: answer it and ask again.
+      await say("No preference on anything else. Which models and years should I look at?");
+      await shortlist.waitFor({ timeout: 80_000 });
+    }
     await page.waitForTimeout(4000); // let the NHTSA year bars fill in
     await page.getByRole("button", { name: "End call" }).click();
     await page.waitForTimeout(1500);
