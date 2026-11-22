@@ -1,4 +1,5 @@
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import { citationKey, citationUrl, linkCitations } from "@/lib/agent";
 
@@ -8,6 +9,7 @@ export function Answer({ text, verified, streaming = false }: { text: string; ve
   return (
     <div className={`answer text-[15px] ${streaming ? "streaming" : ""}`}>
       <ReactMarkdown
+        remarkPlugins={[remarkGfm]} // tables, strikethrough, task lists: models use them
         urlTransform={(url) => url}
         components={{
           a({ href = "", children }) {

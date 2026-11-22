@@ -90,12 +90,13 @@ export function ListingXray({ x }: { x: Xray }) {
   );
 }
 
-// "**Verdict: AVOID**" at the top of an answer becomes a badge.
-const VERDICT_RE = /^\s*\*\*Verdict:\s*(BUY|CAUTION|AVOID)\*\*\s*\n?/;
+// "**Verdict: AVOID**" at the top of an answer becomes a badge. Models vary the markdown
+// ("Verdict: **AVOID**", "**Verdict:** AVOID", "Verdict – AVOID"), so accept all of those.
+const VERDICT_RE = /^\s*(?:\*\*)?\s*Verdict\s*(?:\*\*)?\s*[:\-–—]\s*(?:\*\*)?\s*(BUY|CAUTION|AVOID)\b\s*(?:\*\*)?[ \t]*\n?/i;
 
 export function splitVerdict(text: string): { verdict: "BUY" | "CAUTION" | "AVOID" | null; rest: string } {
   const m = VERDICT_RE.exec(text);
-  return m ? { verdict: m[1] as "BUY" | "CAUTION" | "AVOID", rest: text.slice(m[0].length) } : { verdict: null, rest: text };
+  return m ? { verdict: m[1].toUpperCase() as "BUY" | "CAUTION" | "AVOID", rest: text.slice(m[0].length) } : { verdict: null, rest: text };
 }
 
 const VERDICT_STYLE = {

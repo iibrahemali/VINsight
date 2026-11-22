@@ -210,12 +210,26 @@ export function citationUrl(kind: string, id: string): string | undefined {
 }
 
 // Turn "[recall:19V182000]" into a markdown link with a cite: scheme the renderer styles as a chip.
+// Models vary the format, so also accept spaces inside the brackets and several citations in one
+// bracket: "[ recall:19V182000, recall:19V499000 ]" becomes two chips.
+const CITE_KINDS = "vpic|recalls?|complaints?|years|doc|link";
+const CITE_GROUP = new RegExp(`\\[\\s*((?:(?:${CITE_KINDS}):[^\\],;\\n]+?\\s*[,;]?\\s*)+)\\]`, "gi");
+const CITE_ONE = new RegExp(`(${CITE_KINDS}):([^\\],;\\n]+)`, "i");
+
 export function linkCitations(markdown: string): string {
-  // Model names can contain spaces ("Grand Cherokee"), so the id is URI-encoded inside the link.
-  return markdown.replace(/\[(vpic|recalls?|complaints?|years|doc|link):([^\]\n]+)\]/g, (_, kind: string, id: string) => {
-    const k = kind === "recalls" ? "recall" : kind;
-    return `[${k}:${id}](cite:${k}/${encodeURIComponent(id.trim())})`;
-  });
+  return markdown.replace(CITE_GROUP, (_, inner: string) =>
+    inner
+      .split(/[,;]/)
+      .map((part) => CITE_ONE.exec(part.trim()))
+      .filter((m): m is RegExpExecArray => m !== null)
+      .map((m) => {
+        const kind = m[1].toLowerCase() === "recalls" ? "recall" : m[1].toLowerCase();
+        const id = m[2].trim();
+        // Model names can contain spaces ("Grand Cherokee"), so the id is URI-encoded inside the link.
+        return `[${kind}:${id}](cite:${kind}/${encodeURIComponent(id)})`;
+      })
+      .join(" "),
+  );
 }
 
 const VIN_RE = /\b[A-HJ-NPR-Z0-9]{17}\b/;
