@@ -68,7 +68,7 @@ export function Composer(props: {
         setDragging(false);
         if (e.dataTransfer.files.length) attachFiles(e.dataTransfer.files);
       }}
-      className={`relative rounded-2xl border bg-panel shadow-[0_8px_30px_-12px_rgba(0,0,0,0.25)] transition-colors ${
+      className={`relative rounded-2xl border bg-panel transition-colors ${
         dragging ? "border-accent" : "border-line focus-within:border-accent/60"
       }`}
     >
