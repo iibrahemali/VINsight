@@ -1,12 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#2dd4bf"/>
-      <stop offset="1" stop-color="#0f766e"/>
-    </linearGradient>
-  </defs>
-  <rect width="64" height="64" rx="16" fill="url(#g)"/>
-  <circle cx="28" cy="28" r="14" fill="none" stroke="#fff" stroke-width="5"/>
-  <path d="M38.5 38.5 49 49" stroke="#fff" stroke-width="6" stroke-linecap="round"/>
-  <path d="M22 23v10M26 21v14M30 24v8M34 22v12" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <!-- A dark tile keeps the car visible on both light and dark browser tab bars. -->
+  <rect width="24" height="24" rx="6" fill="#141417"/>
+  <g transform="translate(2.4 1.6) scale(0.8)">
+    <path d="M4 18v-5.5L6.5 7h11l2.5 5.5V18H4ZM5.5 18v2M18.5 18v2M7.6 11.5 9 8.6h6l1.4 2.9Z" stroke="#ffffff" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" fill="none"/>
+    <circle cx="7.5" cy="14.8" r="1.5" fill="#2dd4bf"/>
+    <circle cx="16.5" cy="14.8" r="1.5" fill="#2dd4bf"/>
+  </g>
 </svg>

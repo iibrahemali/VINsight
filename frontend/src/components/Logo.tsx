@@ -1,28 +1,26 @@
-// VINsight mark: a magnifying lens over VIN barcode bars.
-export function LogoMark({ size = 28 }: { size?: number }) {
+// VINsight mark: a car seen head-on, with teal headlights. Strokes follow the theme colour.
+export function LogoMark({ size = 24 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true">
-      <defs>
-        <linearGradient id="vinsight-g" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#2dd4bf" />
-          <stop offset="1" stopColor="#0f766e" />
-        </linearGradient>
-      </defs>
-      <rect width="64" height="64" rx="16" fill="url(#vinsight-g)" />
-      <circle cx="28" cy="28" r="14" fill="none" stroke="#fff" strokeWidth="5" />
-      <path d="M38.5 38.5 49 49" stroke="#fff" strokeWidth="6" strokeLinecap="round" />
-      <path d="M22 23v10M26 21v14M30 24v8M34 22v12" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" />
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" className="shrink-0 text-ink">
+      <path
+        d="M4 18v-5.5L6.5 7h11l2.5 5.5V18H4ZM5.5 18v2M18.5 18v2M7.6 11.5 9 8.6h6l1.4 2.9Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        fill="none"
+      />
+      <circle cx="7.5" cy="14.8" r="1.3" fill="var(--accent)" />
+      <circle cx="16.5" cy="14.8" r="1.3" fill="var(--accent)" />
     </svg>
   );
 }
 
-export function Logo({ size = 28 }: { size?: number }) {
+export function Logo({ size = 24 }: { size?: number }) {
   return (
     <span className="inline-flex items-center gap-2">
       <LogoMark size={size} />
-      <span className="text-[17px] font-semibold tracking-tight">
-        VIN<span className="text-accent">sight</span>
-      </span>
+      <span className="text-[16px] font-semibold tracking-tight">VINsight</span>
     </span>
   );
 }
