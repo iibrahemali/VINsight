@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from vinsight import nhtsa
+from vinsight.llm import limits
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -40,3 +41,11 @@ def offline_nhtsa(monkeypatch):
         original(self, transport=transport or httpx.MockTransport(_handler))
 
     monkeypatch.setattr(nhtsa.NHTSAClient, "__init__", patched)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_rate_limits():
+    """Rate-limit memory is shared across chats in the app; each test starts with none."""
+    limits.reset()
+    yield
+    limits.reset()

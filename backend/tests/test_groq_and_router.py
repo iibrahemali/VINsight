@@ -79,7 +79,7 @@ async def test_groq_omits_tool_fields_without_tools():
 
 
 async def test_groq_moves_to_next_model_when_rate_limited():
-    client = FakeGroq([rate_limited(), [chunk(content="hi")]])
+    client = FakeGroq([rate_limited("300"), [chunk(content="hi")]])
     _, step = await collect(GroqConversation(client=client, models=["a", "b"]))
     assert [c["model"] for c in client.calls] == ["a", "b"] and step.model == "b"
 
@@ -149,11 +149,11 @@ async def test_no_fallback_after_partial_output():
 
 
 async def test_groq_short_rate_limit_waits_visibly_then_retries_same_model():
-    client = FakeGroq([rate_limited("0"), [chunk(content="hi")]])
+    client = FakeGroq([rate_limited("1"), [chunk(content="hi")]])
     convo = GroqConversation(client=client, models=["a", "b"])
     convo.add_user("hi")
     items = [i async for i in convo.stream("sys", [])]
-    assert items[0].kind == "notice" and "Retrying" in items[0].text
+    assert items[0].kind == "wait" and items[0].text == "1"
     assert [c["model"] for c in client.calls] == ["a", "a"] and items[-1].model == "a"
 
 
@@ -173,7 +173,7 @@ async def test_failure_notices_are_short_and_friendly():
     )
     router.add_user("hi")
     notice = (await drain(router))[0].text
-    assert notice == "Gemini is over its free-tier limit. Switched to GPT-OSS." and "{" not in notice
+    assert notice == "Gemini is busy this minute. Switched to GPT-OSS." and "{" not in notice
 
 
 async def test_fallback_keeps_going_until_a_provider_answers():
@@ -203,5 +203,67 @@ async def test_rate_limited_model_is_skipped_on_the_next_turn():
     router.add_user("again")
     items = await drain(router)
     # A fresh qwen instance answers; the rate-limited model is not streamed from again.
-    assert items[0].kind == "notice" and "for now" in items[0].text and items[-1].texts == ["a"]
+    assert items[0].kind == "notice" and "busy right now" in items[0].text and items[-1].texts == ["a"]
     assert router.active == "qwen"
+
+
+def rate_limited_daily():
+    response = httpx.Response(429, headers={"retry-after": "3000"}, request=httpx.Request("POST", "https://api.groq.com"))
+    return groq.RateLimitError("Rate limit reached for model `a` on tokens per day (TPD): Limit 200000", response=response, body=None)
+
+
+async def test_daily_limit_is_remembered_across_chats():
+    first = FakeGroq([rate_limited_daily(), [chunk(content="hi")]])
+    await collect(GroqConversation(client=first, models=["a", "b"]))
+    second = FakeGroq([[chunk(content="hi again")]])
+    _, step = await collect(GroqConversation(client=second, models=["a", "b"]))
+    # The new chat doesn't spend a request (or the user's time) on the model that's out for the day.
+    assert [c["model"] for c in second.calls] == ["b"] and step.model == "b"
+
+
+async def test_paces_when_the_minute_budget_is_nearly_spent(monkeypatch):
+    from vinsight.llm import limits
+
+    slept = []
+
+    async def fake_sleep(seconds):
+        slept.append(seconds)
+
+    monkeypatch.setattr("vinsight.llm.groq.asyncio.sleep", fake_sleep)
+    limits.note_headers("a", limits.key_id("k"), {"x-ratelimit-remaining-tokens": "500", "x-ratelimit-reset-tokens": "9s"})
+    # No per-minute limit in the headers: wait for the full reset.
+    client = FakeGroq([[chunk(content="hi")]])
+    convo = GroqConversation(client=client, models=["a"], api_key="k")
+    convo.add_user("hi")
+    items = [i async for i in convo.stream("sys", [])]
+    assert items[0].kind == "wait" and 8 < slept[0] <= 9
+    assert [c["model"] for c in client.calls] == ["a"]
+
+
+async def test_all_busy_error_says_when_to_retry():
+    from vinsight.llm.base import friendly_error
+
+    client = FakeGroq([rate_limited("300"), rate_limited("200")])
+    convo = GroqConversation(client=client, models=["a", "b"])
+    convo.add_user("hi")
+    with pytest.raises(LLMError) as e:
+        await collect(convo)
+    assert e.value.scope == "minute" and 190 < e.value.retry_in <= 200
+    assert "busy" in friendly_error(e.value) and "seconds" in friendly_error(e.value)
+
+
+def test_pacing_waits_only_for_the_missing_tokens():
+    from vinsight.llm import limits
+
+    limits.note_headers("m", "k", {"x-ratelimit-remaining-tokens": "1000", "x-ratelimit-limit-tokens": "8000",
+                                   "x-ratelimit-reset-tokens": "52s"})
+    # 8000 a minute refills ~133 a second: 2000 more tokens take ~15 s, not the full 52 s reset.
+    assert 14 < limits.wait_for("m", "k", 3000) <= 15.1
+    assert limits.wait_for("m", "k", 900) == 0
+
+
+def test_compaction_keeps_a_read_page_text_but_trims_incidental_prose():
+    from vinsight.llm.groq import _compact
+
+    out = _compact({"text": "word " * 400, "summary": "word " * 400}, 110)
+    assert len(out["text"]) > 1900 and len(out["summary"]) <= 111

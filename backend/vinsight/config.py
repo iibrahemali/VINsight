@@ -28,7 +28,8 @@ class Settings(BaseSettings):
     # gpt-oss-20b is the last resort: smaller, but it has its own daily token budget, so the app keeps
     # answering once the 120b model's free 200K tokens/day are spent.
     groq_models: list[str] = ["openai/gpt-oss-120b", "openai/gpt-oss-20b"]
-    groq_max_wait_s: float = 20.0  # wait out a per-minute rate limit up to this long, else switch model
+    # Wait out a per-minute limit up to this long (Groq usually asks for 5-30 s), else try another model.
+    groq_max_wait_s: float = 35.0
     groq_timeout_s: float = 30.0
     groq_max_completion_tokens: int = 2048
     # The note-taker's models, in order; each has a separate rate-limit budget from the advisor's.

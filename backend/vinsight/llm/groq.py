@@ -2,33 +2,68 @@
 
 import asyncio
 import json
+import logging
+import math
 
 import groq
 
 from vinsight.config import settings
+from vinsight.llm import limits
 from vinsight.llm.base import Delta, LLMError, Step, ToolCall, ToolResult, ToolSpec
 
+log = logging.getLogger(__name__)
 
-def _compact(value, max_str: int):
-    """Shrink a tool result for a tight token budget: drop empty/false/null fields and long-text tails.
-    IDs and numbers are never touched, so citations still resolve."""
+
+def _group_recalls(recalls: list[dict]) -> list[dict]:
+    """Recalls by component, for the model: every campaign number stays (for citations), plus one
+    consequence per group and the park-it / park-outside flags. Two dozen recalls go from ~2,400
+    tokens to a few hundred."""
+    groups: dict[str, dict] = {}
+    for r in recalls:
+        component = (r.get("component") or "OTHER").split(":")[0].strip()
+        g = groups.setdefault(component, {"component": component, "campaigns": [], "consequence": r.get("consequence")})
+        g["campaigns"].append(r.get("campaign_number"))
+        g["consequence"] = g["consequence"] or r.get("consequence")
+        for flag in ("park_it", "park_outside"):
+            if r.get(flag):
+                g[flag] = True
+    return sorted(groups.values(), key=lambda g: (not g.get("park_it"), not g.get("park_outside"), -len(g["campaigns"])))
+
+
+def _for_model(value):
+    """The model's copy of a tool result: recalls grouped, URLs dropped (the UI keeps the full result)."""
     if isinstance(value, dict):
-        out = {k: _compact(v, max_str) for k, v in value.items() if v not in (None, False, "", [], {})}
-        return {k: v for k, v in out.items() if v not in ("", [], {})}
+        out = {k: _for_model(v) for k, v in value.items() if k != "url"}
+        if isinstance(value.get("recalls"), list) and value["recalls"] and isinstance(value["recalls"][0], dict):
+            out["recalls"] = _group_recalls(value["recalls"])
+        return out
     if isinstance(value, list):
-        return [_compact(v, max_str) for v in value]
-    if isinstance(value, str) and len(value) > max_str:
-        return value[:max_str].rsplit(" ", 1)[0] + "…"
+        return [_for_model(v) for v in value]
     return value
 
 
-def _retry_after(error: Exception | None) -> float | None:
-    """Seconds Groq asked us to wait, from the retry-after header."""
-    response = getattr(error, "response", None)
-    try:
-        return float(response.headers.get("retry-after")) if response is not None else None
-    except (TypeError, ValueError):
-        return None
+# Fields that are the point of the result, not incidental prose: a read web page's text (already
+# trimmed to the user's focus by read_link) must reach the model, or it re-reads the page in a loop.
+_KEEP_LONG = {"text": 3000}
+
+
+def _compact(value, max_str: int, key: str = ""):
+    """Shrink a tool result for a tight token budget: drop empty/false/null fields and long-text tails.
+    IDs and numbers are never touched, so citations still resolve."""
+    if isinstance(value, dict):
+        out = {k: _compact(v, max_str, k) for k, v in value.items() if v not in (None, False, "", [], {})}
+        return {k: v for k, v in out.items() if v not in ("", [], {})}
+    if isinstance(value, list):
+        return [_compact(v, max_str, key) for v in value]
+    limit = _KEEP_LONG.get(key, max_str)
+    if isinstance(value, str) and len(value) > limit:
+        return value[:limit].rsplit(" ", 1)[0] + "…"
+    return value
+
+
+def _estimate_tokens(payload) -> int:
+    """Rough input size, for pacing: JSON-heavy text runs about 3.5 characters a token."""
+    return int(len(json.dumps(payload, separators=(",", ":"))) / 3.5)
 
 
 class GroqConversation:
@@ -39,59 +74,40 @@ class GroqConversation:
             api_key=api_key or settings.groq_api_key, max_retries=0, timeout=settings.groq_timeout_s
         )
         self._models = models or settings.groq_models
+        self._key = limits.key_id(api_key or settings.groq_api_key)
         self.history: list[dict] = []
 
     def add_user(self, text: str) -> None:
         self.history.append({"role": "user", "content": text})
 
     async def stream(self, system: str, tools: list[ToolSpec], effort: str | None = None):
-        last_error: Exception | None = None
-        attempts = [(m, retry) for m in self._models for retry in (False, True)]
-        for model, retry in attempts:
-            if retry and not isinstance(last_error, groq.RateLimitError):
-                continue  # only a short rate-limit wait earns a second try on the same model
-            if retry:
-                wait = _retry_after(last_error)
-                if wait is None or wait > settings.groq_max_wait_s:
-                    continue  # a long wait: try the next model instead of hanging
-                yield Delta("notice", f"Groq's free tier is busy (per-minute limit). Retrying in {wait:.0f}s…")
-                await asyncio.sleep(wait)
-            try:
-                tool_args = (
-                    {
-                        "tools": [
-                            {
-                                "type": "function",
-                                "function": {"name": t.name, "description": t.description, "parameters": t.input_schema},
-                            }
-                            for t in tools
-                        ],
-                        "tool_choice": "auto",
-                    }
-                    if tools
-                    else {}  # Groq rejects tool_choice: null, so omit both when there are no tools
-                )
-                response = await self._client.chat.completions.create(
-                    model=model,
-                    messages=[{"role": "system", "content": system}, *self.history],
-                    # Groq counts the reserved completion against the per-minute budget, so keep it modest.
-                    max_completion_tokens=settings.groq_max_completion_tokens,
-                    stream=True,
-                    **tool_args,
-                    **({"reasoning_effort": effort} if effort and model.startswith("openai/gpt-oss") else {}),
-                    # Qwen otherwise puts its reasoning inline in <think> tags; ask for it separately.
-                    **({"reasoning_format": "parsed"} if model.startswith("qwen/") else {}),
-                )
+        messages = [{"role": "system", "content": system}, *self.history]
+        tool_args = (
+            {
+                "tools": [
+                    {"type": "function", "function": {"name": t.name, "description": t.description, "parameters": t.input_schema}}
+                    for t in tools
+                ],
+                "tool_choice": "auto",
+            }
+            if tools
+            else {}  # Groq rejects tool_choice: null, so omit both when there are no tools
+        )
+        # Groq counts the input *and* the reserved reply against the per-minute budget.
+        need = _estimate_tokens([messages, tool_args]) + settings.groq_max_completion_tokens
+        response, model, last_error = None, None, None
+        for model in self._models:
+            async for item in self._open(model, messages, tool_args, need, effort):
+                if isinstance(item, Delta):
+                    yield item
+                elif isinstance(item, Exception):
+                    last_error = item
+                else:
+                    response = item
+            if response is not None:
                 break
-            except (groq.RateLimitError, groq.InternalServerError, groq.APITimeoutError, groq.APIConnectionError) as e:
-                last_error = e
-            except groq.APIStatusError as e:
-                if e.status_code == 413:  # request bigger than this model's per-minute budget: try the next
-                    last_error = e
-                    continue
-                raise LLMError(f"Groq rejected the request: {e.message}") from e
-        else:
-            raise LLMError(f"all Groq models unavailable or rate-limited ({type(last_error).__name__}: {last_error})")
+        if response is None:
+            raise self._give_up(last_error)
 
         step = Step(model=model)
         text, reasoning, finish = [], [], None
@@ -142,6 +158,66 @@ class GroqConversation:
             step.stop = "refusal"
         yield step
 
+    async def _open(self, model: str, messages: list, tool_args: dict, need: int, effort: str | None):
+        """Start a stream on one model, pacing to its per-minute budget. Yields notices, then either the
+        stream or the exception that made this model give up (so the next model can be tried)."""
+        for _ in range(3):
+            if (out := limits.blocked(model, self._key)) and out[1] == "day":
+                yield LLMError(f"{model} used its free daily quota", retry_in=out[0], scope="day")
+                return
+            # Wait for room this minute if it comes soon; a long wait is worse than another model.
+            wait = max(limits.wait_for(model, self._key, need), out[0] if out else 0.0)
+            if wait > settings.groq_max_wait_s:
+                yield LLMError(f"{model} is busy for {wait:.0f}s", retry_in=wait, scope="minute")
+                return
+            if wait > 0:
+                yield Delta("wait", str(math.ceil(wait)))
+                await asyncio.sleep(wait)
+            try:
+                stream = await self._client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    max_completion_tokens=settings.groq_max_completion_tokens,
+                    stream=True,
+                    **tool_args,
+                    **({"reasoning_effort": effort} if effort and model.startswith("openai/gpt-oss") else {}),
+                    # Qwen otherwise puts its reasoning inline in <think> tags; ask for it separately.
+                    **({"reasoning_format": "parsed"} if model.startswith("qwen/") else {}),
+                )
+                limits.note_headers(model, self._key, getattr(getattr(stream, "response", None), "headers", None))
+                yield stream
+                return
+            except groq.RateLimitError as e:
+                scope, seconds = limits.limit_scope(e), limits.retry_in(e)
+                log.info("groq %s rate-limited (%s, retry in %s): %s", model, scope, seconds, e)
+                limits.block(model, self._key, seconds if seconds is not None else (3600 if scope == "day" else 20), scope)
+                if scope == "day":
+                    yield LLMError(str(e), retry_in=seconds, scope="day")
+                    return
+                # A per-minute limit: loop round, which waits (visibly) if the wait is short.
+            except groq.APIStatusError as e:
+                if e.status_code == 413:  # bigger than this model's per-minute budget: try the next
+                    yield LLMError(f"request too large for {model}: {e.message}", scope="minute")
+                    return
+                if isinstance(e, groq.InternalServerError):
+                    yield e
+                    return
+                raise LLMError(f"Groq rejected the request: {e.message}") from e
+            except (groq.APITimeoutError, groq.APIConnectionError) as e:
+                yield e
+                return
+        out = limits.blocked(model, self._key)
+        yield LLMError(f"{model} stayed busy", retry_in=out[0] if out else None, scope="minute")
+
+    def _give_up(self, error: Exception | None) -> LLMError:
+        if isinstance(error, LLMError):
+            # Report the soonest any of the models frees up, and "day" only if every one is out for the day.
+            outs = [limits.blocked(m, self._key) for m in self._models]
+            scope = "day" if outs and all(o and o[1] == "day" for o in outs) else "minute"
+            waits = [o[0] for o in outs if o]
+            return LLMError(f"all Groq models unavailable or rate-limited: {error}", retry_in=min(waits) if waits else error.retry_in, scope=scope)
+        return LLMError(f"all Groq models unavailable ({type(error).__name__}: {error})")
+
     def add_model_turn(self, step: Step) -> None:
         """Append a model turn. Also used to replay another provider's turns."""
         turn: dict = {"role": "assistant", "content": "\n\n".join(step.texts) or None}
@@ -155,7 +231,7 @@ class GroqConversation:
     def add_tool_results(self, results: list[ToolResult]) -> None:
         for r in results:
             # Compact separators and a trimmed view: on an 8K tokens-per-minute budget it matters.
-            payload = r.content if isinstance(r.content, str) else _compact(r.content, settings.groq_max_text_chars)
+            payload = r.content if isinstance(r.content, str) else _compact(_for_model(r.content), settings.groq_max_text_chars)
             content = payload if isinstance(payload, str) else json.dumps(payload, separators=(",", ":"))
             self.history.append(
                 {"role": "tool", "tool_call_id": r.call.id, "content": f"ERROR: {content}" if r.is_error else content}

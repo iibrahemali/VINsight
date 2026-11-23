@@ -23,6 +23,7 @@ from vinsight.llm.base import short_reason
 from vinsight.models import BuyerProfile
 
 _DONE = object()
+KEEPALIVE_S = 10
 log = logging.getLogger(__name__)
 
 
@@ -226,7 +227,16 @@ async def chat(req: ChatRequest, request: Request) -> StreamingResponse:
         session.task = asyncio.create_task(produce())
         yield f"event: session\ndata: {session_id}\n\n"
         try:
-            while (event := await queue.get()) is not _DONE:
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), KEEPALIVE_S)
+                except TimeoutError:
+                    # An SSE comment, ignored by the browser. Proxies (the Next.js dev server's among
+                    # them) drop a stream that's silent for ~30 s, e.g. while pacing to a rate limit.
+                    yield ": keepalive\n\n"
+                    continue
+                if event is _DONE:
+                    break
                 yield f"data: {event.model_dump_json(exclude_none=True)}\n\n"
         finally:
             # Client went away (closed tab, aborted fetch): stop the work too.

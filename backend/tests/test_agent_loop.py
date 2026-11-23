@@ -164,3 +164,19 @@ async def test_a_stalled_model_step_ends_the_turn(monkeypatch):
     async with ToolBox(server) as tools:
         events = [e async for e in Agent(tools, Stalled([])).run("hi", "coach")]
     assert [e.type for e in events] == ["error"] and "too long" in events[0].text
+
+
+async def test_a_repeat_of_a_prefetched_lookup_gets_a_short_pointer_not_the_data_again():
+    from vinsight.llm import ConversationRouter
+
+    car = {"make": "HONDA", "model": "Accord", "year": 2003}
+    convo = ScriptedConversation([
+        Step(tool_calls=[call("r1", "get_recalls", **car)], stop="tool_use"),
+        Step(texts=["Verdict: CAUTION"]),
+    ])
+    router = ConversationRouter({"x": lambda: convo}, active="x")
+    async with ToolBox(server) as tools:
+        events = [e async for e in Agent(tools, router).run("Check 1HGCM82633A004352", "inspector", vin="1HGCM82633A004352")]
+    assert [e.name for e in events if e.type == "tool_call"] == ["decode_vin", "get_recalls", "get_complaints"]  # not shown twice
+    repeat = convo.tool_results[-1][0]
+    assert repeat.call.id == "r1" and "Already fetched" in repeat.content

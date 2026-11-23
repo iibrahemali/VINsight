@@ -22,7 +22,7 @@ without repeating yourself.
 | Mode | For when you… | What you get |
 | --- | --- | --- |
 | **Inspector** | found a car | Paste a VIN, a listing link or a PDF. A verdict (worth a look, caution or avoid) in one sentence, the recalls and complaint patterns that matter, checks for your mechanic, and questions for the seller. |
-| **Scout** | don't know what to buy | A shortlist that fits your budget and life, with the model years to avoid backed by complaint data. |
+| **Scout** | don't know what to buy | A shortlist that fits your budget and life: the model years to avoid (from complaint data), EPA fuel economy and yearly fuel cost, and how cheap parts are to find. |
 | **Coach** | have never done this | Plain-English guidance: the real monthly cost, title types, financing, inspections, common scams. |
 | **Advisor** | would rather talk it through | A hands-free voice call with Sam. A car brief fills in as you talk, and every model he recommends is checked against NHTSA data. |
 
@@ -40,11 +40,15 @@ VIN and compares it with the car being advertised: a 2015 Camry listing whose VI
   and how to answer. Steps that never change (decode a VIN, then pull its recalls and complaints;
   X-ray an attached listing; the minimum verdict a salvage title forces) run in code. That made
   answers faster, cheaper and more reliable than letting a model plan them.
-- **Tools are an MCP server.** Six tools behind the Model Context Protocol, usable from any MCP
-  client, not just this app.
+- **Tools are an MCP server.** Eight tools behind the Model Context Protocol (NHTSA, EPA, listing
+  X-ray, link reader), usable from any MCP client, not just this app.
 - **Model-agnostic, with live fallback.** GPT-OSS 120B on Groq by default, then GPT-OSS 20B, then
   Gemini. If a model fails mid-conversation, the history is replayed into the next one and the chat
-  continues. Rate limits are shown, never waited out silently.
+  continues.
+- **Built for a free tier's 8K tokens a minute.** Lean prompts and tool results (two dozen recalls
+  reach the model in ~400 tokens), one tool call that researches a whole shortlist, and pacing that
+  reads the provider's rate-limit headers and waits a few seconds when needed instead of failing
+  over. Which models are out of quota is shared across every chat.
 - **Streams everything.** Reasoning, tool steps with timings and the answer arrive live (first
   reasoning token in about 0.4 s on Groq), with a Stop button that cancels the work on the server.
 - **A real-time voice agent without paid infrastructure.** Voice detection runs in the browser
@@ -63,8 +67,9 @@ flowchart LR
   UI["Next.js app<br/>chat · voice call · X-ray"] -- "streamed events (SSE)" --> API["FastAPI"]
   API --> Agent["Agent loop<br/>personas · prefetch · watchdog"]
   Agent --> Router["Model router<br/>GPT-OSS 120B → 20B → Gemini"]
-  Agent -- MCP --> Tools["Tool server<br/>VIN · recalls · complaints · years<br/>listing X-ray · read link"]
+  Agent -- MCP --> Tools["Tool server<br/>VIN · recalls · complaints · years · fuel economy<br/>listing X-ray · read link"]
   Tools --> NHTSA[("NHTSA<br/>public APIs")]
+  Tools --> EPA[("EPA<br/>fueleconomy.gov")]
   API --> Voice["Voice<br/>Whisper · Orpheus"]
   API --> Notes["Note-taker agent<br/>+ NHTSA year check"]
 ```
@@ -73,7 +78,7 @@ flowchart LR
 
 **Backend:** Python, FastAPI, a hand-written agent loop, MCP, Groq (GPT-OSS, Whisper, Orpheus),
 Gemini · **Frontend:** Next.js, React, Tailwind CSS, Web Audio, WebRTC, Kokoro (in-browser voice) ·
-**Data:** NHTSA vPIC, recalls and complaints APIs · **Testing:** pytest (offline, recorded fixtures),
+**Data:** NHTSA vPIC, recalls and complaints APIs, EPA fuel economy · **Testing:** pytest (offline, recorded fixtures),
 Playwright (demo)
 
 ## Roadmap

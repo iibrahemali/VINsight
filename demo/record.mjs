@@ -1,13 +1,15 @@
 // Records a short, real demo of VINsight (no mocked UI), one video per scene:
-//   1 vin      Inspector: a VIN check streaming into a cited verdict
-//   2 listing  Inspector: a scam listing, X-rayed, VIN mismatch caught
-//   3 scout    Scout: which model years to avoid, backed by NHTSA data
-//   4 coach    Coach: an answer streaming in, then Stop
+//   1 vin      Inspector: a VIN check, reasoning and tool steps streaming into a cited verdict
+//   2 listing  Inspector: a scam listing attached as a PDF, X-rayed, VIN mismatch caught
+//   3 scout    Scout: a shortlist with years to avoid, EPA running costs and clickable sources
+//   4 coach    Coach: reads a linked web page and answers from it, citing it
 //   5 advisor  Advisor: a voice call (the caller types via the call's Type control: headless
 //              browsers can't capture audio here, but Sam's voice, captions and the car brief are real)
-//   6 tour     model picker, API keys, light mode
+//   6 tour     New chat, Stop mid-answer, model picker, API keys, light mode
 // Scenes are recorded separately with unrecorded pauses between them, so the free tier's
-// per-minute token budget resets. Needs the app running (backend :8000, frontend :3000).
+// per-minute token budget resets. A scene that shows a rate-limit, model-switch, pacing or error
+// message anywhere is thrown away and retried: the demo only ever shows clean runs.
+// Needs the app running (backend :8000, frontend :3000).
 // Usage: pnpm record [scene ...]   then   ./make-gif.sh
 import { mkdirSync } from "node:fs";
 import { chromium } from "playwright";
@@ -33,14 +35,26 @@ async function scene(browser, name, run, extra = {}) {
   const page = await context.newPage();
   page.on("console", (m) => m.type() === "error" && console.log(`  [${name} console] ${m.text().slice(0, 200)}`));
   page.on("pageerror", (e) => console.log(`  [${name} page error] ${String(e).slice(0, 200)}`));
+  // Watch the page while the scene runs: any of these, even briefly, spoils the take.
+  const seen = new Set();
+  const watch = setInterval(async () => {
+    const text = await page.locator("body").innerText().catch(() => "");
+    for (const m of text.matchAll(BLEMISHES)) seen.add(m[0]);
+  }, 400);
   try {
     await page.goto(URL);
     await page.waitForTimeout(900);
     await run(page);
+    // Raw citations: checked on the finished answers (mid-stream, a citation's "]" may not be there yet).
+    const answers = (await page.locator(".answer").allInnerTexts().catch(() => [])).join("\n");
+    for (const m of answers.matchAll(RAW_CITES)) seen.add(m[0]);
+    if (seen.size) throw new Error(`blemish on screen: ${[...seen].join(" | ")}`);
   } catch (err) {
+    clearInterval(watch);
     await context.close();
     throw err;
   }
+  clearInterval(watch);
   const video = page.video();
   await context.close(); // finishes writing the video
   await video.saveAs(`out/${name}.webm`);
@@ -49,14 +63,20 @@ async function scene(browser, name, run, extra = {}) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+const BLEMISHES =
+  /[^\n]*(free-tier limit|free quota|over its free|Switched to|busy this minute|busy right now|Pacing to|couldn't answer|took too long|not in tool results|No voice available|voice hit its|Couldn't update|blocked bots|Couldn't read|Error executing|Every model)[^\n]*/gi;
+// Citations the answer renderer didn't turn into numbered sources (checked in answers only: the
+// model's reasoning panel legitimately mentions the citation format).
+const RAW_CITES = /[^\n]*(【|\[(?:recall|complaints?|years|vpic|epa|doc|link):|\bopen recalls?\b)[^\n]*/gi;
+
 /** One retry per scene: a free-tier hiccup shouldn't throw away the whole run. */
 async function sceneWithRetry(browser, name, run, extra) {
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       return await scene(browser, name, run, extra);
     } catch (err) {
       console.log(`scene ${name} failed (attempt ${attempt}): ${String(err).split("\n")[0]}`);
-      if (attempt === 2) return console.log(`skipping scene ${name}`);
+      if (attempt === 3) return console.log(`skipping scene ${name}`);
       await sleep(PAUSE_MS);
     }
   }
@@ -100,14 +120,14 @@ const mode = (page, name) => page.getByRole("navigation", { name: "Modes" }).get
 const SCENES = {
   vin: async (page) => {
     await ask(page, "Is this car worth a look? VIN 1HGCM82633A004352");
-    await linger(page, "text=/^(BUY|CAUTION|AVOID)$/");
+    await linger(page, "text=Sources", 2500);
   },
   listing: async (page) => {
-    await page.locator('input[type="file"]').setInputFiles("listing.txt");
+    await page.locator('input[type="file"]').setInputFiles("listing.pdf");
     await page.getByText(/Read ·/).first().waitFor();
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(600);
     await ask(page, "Is this a good deal?");
-    await linger(page, "text=/^(BUY|CAUTION|AVOID)$/");
+    await linger(page, "text=Sources", 2500);
   },
   scout: async (page) => {
     await mode(page, "Scout").click();
@@ -128,10 +148,10 @@ const SCENES = {
     await page.getByRole("button", { name: "Add link" }).click();
     await page.getByPlaceholder(/Paste a listing link/).pressSequentially("https://en.wikipedia.org/wiki/Vehicle_title_branding", { delay: 12 });
     await page.keyboard.press("Enter");
-    await page.waitForTimeout(1500);
+    await page.getByText(/Read ·/).first().waitFor({ timeout: 20_000 });
+    await page.waitForTimeout(600);
     await ask(page, "Using this page, what's the difference between a salvage and a rebuilt title? Keep it short.");
-    await page.getByText("Sources", { exact: true }).waitFor({ timeout: 60_000 }).catch(() => {});
-    await page.waitForTimeout(2500);
+    await linger(page, "text=Sources", 2500);
   },
   advisor: async (page) => {
     await mode(page, "Advisor").click();
@@ -167,6 +187,16 @@ const SCENES = {
     await page.waitForTimeout(1500);
   },
   tour: async (page) => {
+    // Stop: start an answer and stop it mid-stream.
+    await mode(page, "Coach").click();
+    await page.waitForTimeout(400);
+    await type(page, "Walk me through buying my first used car, step by step.");
+    await page.locator(".answer").first().waitFor({ timeout: 60_000 });
+    await page.waitForTimeout(700);
+    if (await stopButton(page).isVisible()) await stopButton(page).click({ timeout: 2000 }).catch(() => {});
+    await page.waitForTimeout(1200);
+    await page.getByRole("button", { name: "New chat" }).click();
+    await page.waitForTimeout(800);
     await page.getByRole("button", { name: /GPT-OSS 120B/ }).click();
     await page.waitForTimeout(1600);
     await page.keyboard.press("Escape");
@@ -191,7 +221,7 @@ const browser = await chromium.launch({
 
 let first = true;
 for (const name of order) {
-  const usesModel = name !== "tour";
+  const usesModel = true; // every scene asks a model something now (the tour shows Stop)
   if (!first && usesModel) {
     console.log(`pausing ${PAUSE_MS / 1000}s (not recorded) so the free-tier per-minute budget resets…`);
     await sleep(PAUSE_MS);

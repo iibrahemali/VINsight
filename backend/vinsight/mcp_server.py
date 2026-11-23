@@ -58,11 +58,9 @@ async def _nhtsa() -> AsyncIterator[NHTSAClient]:
 
 @server.tool()
 async def decode_vin(vin: str) -> Vehicle:
-    """Decode a 17-character VIN into year, make, model, trim, engine and drivetrain using NHTSA vPIC.
-
-    Also validates the VIN offline (length, illegal characters, check digit). `warnings` lists
-    anything suspicious, such as a check-digit mismatch, which can mean a typo or a tampered VIN.
-    Call this first whenever a VIN is available; use its make/model/year for every other tool.
+    """Decode a 17-character VIN (NHTSA vPIC): year, make, model, trim, engine, drivetrain.
+    `warnings` flags problems such as a check-digit mismatch (a typo or a tampered VIN). Use its
+    make/model/year for the other tools.
     """
     async with _nhtsa() as nhtsa:
         return await nhtsa.decode_vin(vin)
@@ -70,10 +68,8 @@ async def decode_vin(vin: str) -> Vehicle:
 
 @server.tool()
 async def get_recalls(make: str, model: str, year: int) -> RecallsResult:
-    """List NHTSA safety recalls for a year/make/model, each with its campaign number.
-
-    Use the make and model exactly as decode_vin returned them. The results show recalls that
-    were issued for the model, not whether a given car has had the repair done.
+    """NHTSA recalls for a year/make/model, with campaign numbers. Use make and model as
+    decode_vin returned them. Shows recalls issued for the model, not whether this car was repaired.
     """
     async with _nhtsa() as nhtsa:
         return await nhtsa.get_recalls(make, model, year)
@@ -81,11 +77,8 @@ async def get_recalls(make: str, model: str, year: int) -> RecallsResult:
 
 @server.tool()
 async def get_complaints(make: str, model: str, year: int) -> ComplaintsSummary:
-    """Summarize owner complaints filed with NHTSA for a year/make/model.
-
-    Returns totals (crashes, fires, injuries, deaths), the components complained about most,
-    and a few sample complaint narratives with their ODI numbers. A high count on one component
-    is a strong signal of a known failure point.
+    """NHTSA owner complaints for a year/make/model: totals (crashes, fires, injuries, deaths),
+    the most-complained-about components, and a few sample complaints with ODI numbers.
     """
     async with _nhtsa() as nhtsa:
         return await nhtsa.get_complaints(make, model, year)
@@ -95,12 +88,8 @@ async def get_complaints(make: str, model: str, year: int) -> ComplaintsSummary:
 async def compare_model_years(
     make: str, model: str, start_year: int, end_year: int, brief: bool = False
 ) -> ModelYearComparison:
-    """Compare recall and complaint counts across model years of one model (up to 12 years).
-
-    Use it to find which years of a model to target or avoid, or to check whether a specific
-    car's year is unusually problematic compared with the years around it. Make and model must
-    be spelled as NHTSA does (e.g. "HONDA", "Civic"; "FORD", "F-150"). Set `brief` for just the
-    per-year counts (much smaller; use it when you only need to spot bad years).
+    """Recall and complaint counts per model year of one model (up to 12 years), to spot years to
+    avoid. Spell make and model as NHTSA does ("HONDA", "Civic"). `brief`: counts only (smaller).
     """
     async with _nhtsa() as nhtsa:
         result = await nhtsa.compare_model_years(make, model, start_year, end_year)
@@ -151,23 +140,17 @@ async def _xray(text: str) -> ListingAnalysis:
 
 @server.tool()
 async def analyze_listing(text: str) -> ListingAnalysis:
-    """X-ray a used-car listing: extract price, mileage, year/make/model and VIN, and flag red
-    flags and scam patterns (salvage/rebuilt/flood titles, deposits before viewing, shipping-only
-    sellers, odd payment methods, warning lights, mileage problems, and more) with the exact quote.
-
-    If the listing contains a VIN, it is decoded and compared with the car the listing claims to
-    be: a mismatch is a strong scam signal. Returns `verdict_floor`, the strictest verdict the rules
-    require (AVOID / CAUTION / NONE). Your final verdict may be stricter, never more lenient.
-    Pass the listing text exactly as written.
+    """X-ray a used-car listing (pass its text as written): price, mileage, vehicle and VIN, plus
+    red flags and scam patterns with exact quotes. A VIN that doesn't match the advertised car is a
+    strong scam signal. `verdict_floor` (AVOID / CAUTION / NONE) is the most lenient verdict allowed.
     """
     return await _xray(text)
 
 
 @server.tool()
 async def get_fuel_economy(make: str, model: str, year: int) -> FuelEconomy:
-    """EPA fuel economy for a model year: city / highway / combined mpg for each engine and
-    transmission, and EPA's estimated yearly fuel cost. Use it to compare running costs.
-    Cite it as [epa:<make>:<model>:<year>].
+    """EPA fuel economy for a model year: city / highway / combined mpg per engine, and EPA's
+    yearly fuel-cost estimate. Cite as [epa:<make>:<model>:<year>].
     """
     try:
         return await fueleconomy.get_fuel_economy(make, model, year)
@@ -205,11 +188,10 @@ def parse_pick(text: str) -> tuple[str, str, int, int]:
 
 @server.tool()
 async def research_picks(picks: list[str]) -> PicksResearch:
-    """Research a whole shortlist in ONE call. Each pick is a string "MAKE Model start-end" using the
-    recommended years, e.g. ["HONDA Civic 2014-2018", "TOYOTA Corolla 2014-2019"]. For each pick:
-    complaint and recall counts for those years and a few years either side (to spot bad years), and
-    EPA fuel economy for the middle recommended year. Cite years as [years:<make>:<model>:<start>-<end>]
-    and fuel economy as [epa:<make>:<model>:<year>], using the ids in the result.
+    """Research a whole shortlist in ONE call. Picks are strings "MAKE Model start-end" with the
+    recommended years, e.g. ["HONDA Civic 2014-2018", "TOYOTA Corolla 2014-2019"]. Returns per-year
+    complaint and recall counts (a little wider than the range) and EPA fuel economy for the middle
+    year. Cite with the ids in the result: [years:...] and [epa:...].
     """
 
     async def one(text: str) -> PickResearch:
@@ -263,16 +245,10 @@ def _focus(text: str, focus: str | None, limit: int) -> tuple[str, bool]:
 
 @server.tool()
 async def read_link(url: str, focus: str | None = None) -> LinkReading:
-    """Open a web page the user shared and bring back what matters, in one step.
-
-    Returns the page title, readable text (trimmed; pass `focus`, e.g. "price mileage title VIN",
-    to keep the most relevant parts), and any vehicle details the page publishes in structured data
-    (price, mileage, VIN, year, make, model). If the page is a car listing, it is also X-rayed for red
-    flags and its VIN is checked against the listing, so you don't need to call analyze_listing.
-    Some sites (Facebook Marketplace, some dealers) only show bots a preview: then `status` is
-    "partial" and `text` has the title and summary. Use them (e.g. the year/make/model in the title
-    is enough for recalls and complaints) and ask the user to paste the full listing. If `status` is
-    "blocked", nothing was readable: ask for the text. Cite the page as [link:<id>].
+    """Read a web page the user shared: title, trimmed text (`focus`, e.g. "price mileage VIN",
+    keeps the relevant parts) and any structured vehicle data. Car listings are also X-rayed (red
+    flags, VIN check), so analyze_listing isn't needed. `status` "partial": only a preview (use it,
+    ask for the full text); "blocked": ask the user to paste the text. Cite as [link:<id>].
     """
     key = f"{url.strip()}|{focus or ''}"
     cached = _LINK_CACHE.get(key)

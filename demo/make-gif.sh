@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 mkdir -p ../docs out/parts
 # scene:speed, in playback order. Scenes that weren't recorded are skipped.
 # Inspector (the main feature) plays slower so the verdict and sources are readable; the rest is a quick montage.
-SCENES="vin:0.9 listing:0.9 scout:2 coach:2 advisor:2.2 tour:1.5"
+SCENES="vin:0.75 listing:0.75 scout:1.3 coach:1.2 advisor:1.4 tour:1.1"
 : > out/parts.txt
 for entry in $SCENES; do
   name=${entry%%:*}; speed=${entry##*:}

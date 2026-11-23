@@ -4,7 +4,8 @@ import { apiFetch } from "@/lib/keys";
 // Plus citation checking against tool results and attachments.
 
 export type TraceEvent = {
-  type: "notice" | "thinking" | "tool_call" | "tool_result" | "text" | "error" | "done" | "profile";
+  // wait: pacing to the free tier's per-minute budget for `ms`; shown only while it lasts.
+  type: "notice" | "wait" | "thinking" | "tool_call" | "tool_result" | "text" | "error" | "done" | "profile";
   turn: number;
   name?: string;
   input?: Record<string, unknown>;
@@ -239,7 +240,11 @@ const CITE_ONE = new RegExp(`(${CITE_KINDS}):([^\\]),;\\n]+)`, "i");
 const CITE_PAREN = new RegExp(`\\(\\s*(?:sources?\\s*:\\s*)?((?:(?:${CITE_KINDS}):[^),;\\n]+?\\s*[,;]?\\s*)+)\\)`, "gi");
 
 export function linkCitations(markdown: string): string {
-  return markdown.replace(CITE_PAREN, (_, inner: string) => `[${inner}]`).replace(CITE_GROUP, (_, inner: string) =>
+  return markdown
+    // GPT-OSS sometimes writes citations in full-width brackets: 【recall:19V182000】.
+    .replace(/【([^】]*)】/g, (_, inner: string) => `[${inner}]`)
+    .replace(CITE_PAREN, (_, inner: string) => `[${inner}]`)
+    .replace(CITE_GROUP, (_, inner: string) =>
     inner
       .split(/[,;]/)
       .map((part) => CITE_ONE.exec(part.trim()))

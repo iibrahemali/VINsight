@@ -90,8 +90,10 @@ backend/vinsight/
   agent/loop.py       the agent loop: streams trace events, runs tools, prefetches fixed steps
   agent/prompts.py    personas = instructions + tool subset
   llm/                provider adapters (Groq, Gemini, Claude) and the router (switching, fallback)
-  mcp_server.py       tools over MCP: decode_vin, get_recalls, get_complaints,
-                      compare_model_years, analyze_listing, read_link
+  mcp_server.py       tools over MCP: decode_vin, get_recalls, get_complaints, compare_model_years,
+                      get_fuel_economy, research_picks, analyze_listing, read_link
+  llm/limits.py       free-tier budgets shared by all chats: pacing and out-of-quota memory
+  fueleconomy.py      EPA fuel economy client
   nhtsa.py            NHTSA API client
   listing.py          Listing X-ray rules and the verdict floor
   attachments.py      links (with SSRF guard), PDFs, text files

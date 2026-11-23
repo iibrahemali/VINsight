@@ -8,12 +8,11 @@ replayed through `add_model_turn` (natively for Groq/Claude, as text for Gemini)
 """
 
 import logging
-import time
 from collections.abc import Callable
 
+from vinsight.config import settings
+from vinsight.llm import limits
 from vinsight.llm.base import Conversation, Delta, LLMError, Replayable, Step, ToolResult, ToolSpec, _kind, short_reason
-
-LIMIT_COOLDOWN_S = 120  # a model that just hit its rate limit is skipped for this long
 
 log = logging.getLogger(__name__)
 
@@ -29,7 +28,6 @@ class ConversationRouter:
         # Order matters: on failure, the first other provider in this order takes over.
         self._factories = factories
         self._labels = {**_LABELS, **(labels or {})}
-        self._cooling: dict[str, float] = {}  # provider -> time until which it's skipped (rate-limited)
         self.active = active
         self.fallback = fallback
         self._convo: Conversation = factories[active]()
@@ -65,19 +63,30 @@ class ConversationRouter:
         self._log.append(("user", text))
         self._convo.add_user(text)
 
+    def _quota_key(self, provider: str) -> tuple[str, str]:
+        """Where a provider's out-of-quota state is remembered: shared by every chat using the same key."""
+        factory = self._factories.get(provider)
+        api_key = getattr(factory, "keywords", {}).get("api_key")
+        return f"provider:{provider}", limits.key_id(api_key)
+
+    def _unavailable(self, provider: str) -> bool:
+        """Out of quota for longer than is worth waiting (the provider paces short waits itself)."""
+        out = limits.blocked(*self._quota_key(provider))
+        return bool(out) and (out[1] == "day" or out[0] > settings.groq_max_wait_s)
+
     async def stream(self, system: str, tools: list[ToolSpec], effort: str | None = None):
         """Stream from the active provider; if it fails before any output, try every other provider in
-        order (each has its own quota) until one answers, and stay on that one."""
+        order (each has its own quota) until one answers, and stay on that one. Providers known to be
+        out of quota (in any chat) are skipped without trying them."""
         tried: list[str] = []
-        now = time.monotonic()
-        if self.fallback and self._cooling.get(self.active, 0) > now:
-            # The chosen model hit its limit moments ago: go straight to one that isn't cooling down.
-            ready = next((p for p in self._factories if self._cooling.get(p, 0) <= now), None)
+        if self.fallback and self._unavailable(self.active):
+            ready = next((p for p in self._factories if not self._unavailable(p)), None)
             if ready and ready != self.active:
                 skipped = self.active
+                out = limits.blocked(*self._quota_key(skipped))
+                why = "has used up its free quota for today" if out and out[1] == "day" else "is busy right now"
                 self.use(ready)
-                yield Delta("notice", f"{self._labels.get(skipped, skipped)} is over its free-tier limit; "
-                                      f"using {self._labels.get(ready, ready)} for now.")
+                yield Delta("notice", f"{self._labels.get(skipped, skipped)} {why}; using {self._labels.get(ready, ready)}.")
         while True:
             try:
                 async for item in self._convo.stream(system, tools, effort):
@@ -88,9 +97,11 @@ class ConversationRouter:
             except LLMError as e:
                 tried.append(self.active)
                 if _kind(e) == "limit":
-                    self._cooling[self.active] = time.monotonic() + LIMIT_COOLDOWN_S
+                    seconds = e.retry_in if e.retry_in is not None else (3600 if e.scope == "day" else 60)
+                    limits.block(*self._quota_key(self.active), seconds, e.scope or "minute")
                 # Fall back only if nothing reached the user yet; otherwise they'd see two answers spliced.
-                nxt = next((p for p in self._factories if p not in tried), None) if self.fallback else None
+                candidates = [p for p in self._factories if p not in tried and not self._unavailable(p)]
+                nxt = candidates[0] if self.fallback and candidates else None
                 if e.partial or nxt is None:
                     raise
                 failed = self.active

@@ -29,8 +29,8 @@ export function toBlocks(events: TraceEvent[]): Block[] {
       if (open && open.kind === "tool") open.result = e;
     } else if (e.type === "notice" || e.type === "error") {
       blocks.push({ kind: e.type, text: e.text ?? "" });
-    } else if (e.type === "profile") {
-      continue; // shown by the call UI, not in the turn
+    } else if (e.type === "profile" || e.type === "wait") {
+      continue; // profile: shown by the call UI; wait: only in the live waiting indicator
     } else if (e.type === "done") {
       blocks.push({ kind: "done", event: e });
     }

@@ -7,6 +7,7 @@ streams: thinking and answer text reach the UI token by token.
 """
 
 import asyncio
+import json
 import logging
 import sys
 import time
@@ -25,7 +26,8 @@ log = logging.getLogger(__name__)
 
 
 class TraceEvent(BaseModel):
-    type: Literal["notice", "thinking", "tool_call", "tool_result", "text", "error", "done", "profile"]
+    # wait: pacing to the free tier's per-minute budget; `ms` is how long. The UI shows it only while it lasts.
+    type: Literal["notice", "wait", "thinking", "tool_call", "tool_result", "text", "error", "done", "profile"]
     turn: int
     name: str | None = None
     input: dict[str, Any] | None = None
@@ -42,6 +44,23 @@ def _mcp_server_params() -> StdioServerParameters:
     return StdioServerParameters(command=sys.executable, args=["-m", "vinsight.mcp_server"])
 
 
+def _lean_schema(schema):
+    if isinstance(schema, dict):
+        return {k: _lean_schema(v) for k, v in schema.items() if k != "title" or not isinstance(v, str)}
+    if isinstance(schema, list):
+        return [_lean_schema(v) for v in schema]
+    return schema
+
+
+def _call_key(name: str, args: dict) -> str:
+    return f"{name}:{json.dumps(args, sort_keys=True, default=str).lower()}"
+
+
+async def _already_fetched(call: ToolCall, turn: int) -> tuple[ToolResult, TraceEvent]:
+    note = "Already fetched before you started: the full result is earlier in this conversation. Answer from it."
+    return ToolResult(call=call, content=note), TraceEvent(type="tool_result", turn=turn, name=call.name, output=note, ok=True, ms=0)
+
+
 class ToolBox:
     """A live connection to the VINsight MCP server, shareable by many conversations."""
 
@@ -54,7 +73,9 @@ class ToolBox:
         await self._mcp.__aenter__()
         listed = await self._mcp.list_tools()
         self.specs = [
-            ToolSpec(name=t.name, description=t.description or "", input_schema=t.input_schema)
+            # Sent with every model request, so trimmed: docstring indentation collapsed, and the
+            # schema's auto-generated "title" fields dropped (the property names already say it).
+            ToolSpec(name=t.name, description=" ".join((t.description or "").split()), input_schema=_lean_schema(t.input_schema))
             for t in sorted(listed.tools, key=lambda t: t.name)  # stable order keeps prompt caches warm
         ]
         return self
@@ -116,6 +137,7 @@ class Agent:
         model = None
         started = time.perf_counter()
         pending: list[ToolCall] = []  # tool calls the model made whose results aren't recorded yet
+        fetched: set[str] = set()  # tool calls the app already ran this turn (VIN prefetch)
 
         try:
             if isinstance(self.conversation, ConversationRouter):
@@ -135,6 +157,8 @@ class Agent:
                         lookups = [Prefetch(name="get_recalls", input=car), Prefetch(name="get_complaints", input=car)]
                         async for event in self._prefetch(lookups, "car"):
                             yield event
+                        fetched.update(_call_key(f.name, f.input) for f in lookups)
+                    fetched.add(_call_key("decode_vin", {"vin": vin}))
 
             for turn in range(settings.vinsight_max_turns):
                 t0 = time.perf_counter()
@@ -147,6 +171,8 @@ class Agent:
                                 step = item
                             elif item.kind == "notice":
                                 yield TraceEvent(type="notice", turn=turn, text=item.text)
+                            elif item.kind == "wait":
+                                yield TraceEvent(type="wait", turn=turn, ms=float(item.text) * 1000)
                             else:
                                 yield TraceEvent(type="thinking" if item.kind == "thought" else "text", turn=turn, text=item.text)
                 except TimeoutError:
@@ -172,13 +198,21 @@ class Agent:
                     break
 
                 pending = list(step.tool_calls)
+                # Models sometimes re-request what the app already fetched this turn: answer those with a
+                # one-line pointer instead of the full (large) result again, and don't show them twice.
+                repeats = {c.id for c in step.tool_calls if _call_key(c.name, c.input) in fetched}
                 for call in step.tool_calls:
-                    yield TraceEvent(type="tool_call", turn=turn, name=call.name, input=call.input,
-                                     ms=(time.perf_counter() - t0) * 1000)
+                    if call.id not in repeats:
+                        yield TraceEvent(type="tool_call", turn=turn, name=call.name, input=call.input,
+                                         ms=(time.perf_counter() - t0) * 1000)
                 # Independent calls (e.g. recalls + complaints) run concurrently; results go back together.
-                outcomes = await asyncio.gather(*(self._call(call, allowed, turn) for call in step.tool_calls))
-                for _, event in outcomes:
-                    yield event
+                outcomes = await asyncio.gather(*(
+                    _already_fetched(call, turn) if call.id in repeats else self._call(call, allowed, turn)
+                    for call in step.tool_calls
+                ))
+                for (_, event), call in zip(outcomes, step.tool_calls):
+                    if call.id not in repeats:
+                        yield event
                 self.conversation.add_tool_results([r for r, _ in outcomes])
                 pending = []
             else:

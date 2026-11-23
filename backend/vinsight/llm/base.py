@@ -35,7 +35,7 @@ class ToolResult:
 class Delta:
     """A piece of a step as it streams in."""
 
-    kind: Literal["thought", "text", "notice"]
+    kind: Literal["thought", "text", "notice", "wait"]  # wait: pacing to a rate limit; text is the seconds
     text: str
 
 
@@ -52,11 +52,15 @@ class Step:
 
 
 class LLMError(RuntimeError):
-    def __init__(self, message: str, partial: bool = False):
+    def __init__(self, message: str, partial: bool = False, retry_in: float | None = None, scope: str = ""):
         super().__init__(message)
         # True when some output had already streamed before the failure, so a retry elsewhere
         # would show the user a second, different beginning.
         self.partial = partial
+        # For rate limits: how long until the model has room again, and whether that's this minute's
+        # budget or the day's ("minute" / "day").
+        self.retry_in = retry_in
+        self.scope = scope
 
 
 def _kind(error: Exception) -> str:
@@ -70,15 +74,21 @@ def _kind(error: Exception) -> str:
 
 def short_reason(error: Exception) -> str:
     """A few words for why a model failed, for user-facing notices (details go to the log)."""
-    return {"limit": "is over its free-tier limit", "timeout": "didn't respond in time"}.get(_kind(error), "is unavailable right now")
+    if _kind(error) == "limit":
+        return "has used up its free quota for today" if getattr(error, "scope", "") == "day" else "is busy this minute"
+    return {"timeout": "didn't respond in time"}.get(_kind(error), "is unavailable right now")
 
 
 def friendly_error(error: Exception) -> str:
     """What to tell the user when no model could answer."""
     kind = _kind(error)
     if kind == "limit":
-        return ("Every model is over its free-tier limit right now. Wait a minute and try again, "
-                "or add your own free API key under API keys.")
+        if getattr(error, "scope", "") == "day":
+            return ("The free AI quota for today is used up. It resets within a day; "
+                    "or add your own free API key under API keys.")
+        wait = getattr(error, "retry_in", None)
+        when = f"in about {max(1, round(wait))} seconds" if wait else "in a minute"
+        return f"The free AI models are busy right now. Try again {when}, or add your own free API key under API keys."
     if kind == "timeout":
         return "The model didn't respond in time. Please try again."
     return "The model couldn't answer this time. Please try again."

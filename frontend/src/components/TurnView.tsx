@@ -55,12 +55,22 @@ function CallView({ call }: { call: CallSummary }) {
 }
 
 // Shown only until the first reasoning token arrives, so it's never a dead "loading" state.
-function Waiting({ label, since }: { label?: string; since?: number }) {
+// `until`: the app is pacing to the free tier's per-minute budget; count down instead of up.
+function Waiting({ label, since, until }: { label?: string; since?: number; until?: number }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(id);
   }, []);
+  if (until && until > now) {
+    return (
+      <div className="flex items-center gap-2 text-[13px] text-muted">
+        <span className="dot-pulse" />
+        <span className="shimmer">Pacing to the free tier&apos;s per-minute limit…</span>
+        <span className="font-mono text-[11px]">{Math.ceil((until - now) / 1000)}s</span>
+      </div>
+    );
+  }
   const s = since ? Math.floor((now - since) / 1000) : 0;
   return (
     <div className="flex items-center gap-2 text-[13px] text-muted">
@@ -82,7 +92,9 @@ export function TurnView({ turn, verified }: { turn: Turn; verified: Set<string>
   const last = blocks.at(-1);
   const between = last && ((last.kind === "tool" && last.result) || last.kind === "notice");
   const waiting = turn.pending && (blocks.length === 0 || between);
-  const lastAt = turn.events.at(-1)?.at;
+  const lastEvent = turn.events.at(-1);
+  const lastAt = lastEvent?.at;
+  const pacedUntil = lastEvent?.type === "wait" && lastEvent.at ? lastEvent.at + (lastEvent.ms ?? 0) : undefined;
 
   return (
     <article className="space-y-3">
@@ -156,7 +168,7 @@ export function TurnView({ turn, verified }: { turn: Turn; verified: Set<string>
               );
           }
         })}
-        {waiting && <Waiting label={turn.modelLabel} since={blocks.length ? lastAt : turn.startedAt} />}
+        {waiting && <Waiting label={turn.modelLabel} since={blocks.length ? lastAt : turn.startedAt} until={pacedUntil} />}
         {turn.stopped && (
           <p className="flex items-center gap-1.5 text-[12px] text-muted">
             <OctagonX size={13} /> Stopped
