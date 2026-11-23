@@ -112,19 +112,26 @@ const SCENES = {
   scout: async (page) => {
     await mode(page, "Scout").click();
     await page.waitForTimeout(500);
-    await ask(page, "Which years of the Honda Civic should I avoid? Keep it short.");
-    await page.waitForTimeout(1800);
+    await ask(page, "About $12k, 40 highway miles a day, it snows, just me. Gas only, good mileage, no must-haves. What should I look at?");
+    // Scroll through the shortlist, running-costs table and Sources, then hover a source to show its link.
+    await page.getByText("Sources", { exact: true }).waitFor({ timeout: 90_000 });
+    await page.waitForTimeout(1500);
+    const source = page.locator('li[id^="src-"] a').last();
+    await source.scrollIntoViewIfNeeded();
+    await source.hover();
+    await page.waitForTimeout(2200);
   },
   coach: async (page) => {
     await mode(page, "Coach").click();
     await page.waitForTimeout(500);
-    await type(page, "What's the difference between a clean, salvage and rebuilt title?");
-    // Let the answer stream for a moment, then show the Stop button working (Groq can finish a
-    // short answer in about a second, so only click if it's still going).
-    await page.locator(".answer").first().waitFor({ timeout: 60_000 });
-    await page.waitForTimeout(900);
-    if (await stopButton(page).isVisible()) await stopButton(page).click({ timeout: 2000 }).catch(() => {});
-    await page.waitForTimeout(1800);
+    // Links: attach a web page and ask about it; the answer cites the page.
+    await page.getByRole("button", { name: "Add link" }).click();
+    await page.getByPlaceholder(/Paste a listing link/).pressSequentially("https://en.wikipedia.org/wiki/Vehicle_title_branding", { delay: 12 });
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(1500);
+    await ask(page, "Using this page, what's the difference between a salvage and a rebuilt title? Keep it short.");
+    await page.getByText("Sources", { exact: true }).waitFor({ timeout: 60_000 }).catch(() => {});
+    await page.waitForTimeout(2500);
   },
   advisor: async (page) => {
     await mode(page, "Advisor").click();
@@ -153,7 +160,9 @@ const SCENES = {
       await say("No preference on anything else. Which models and years should I look at?");
       await shortlist.waitFor({ timeout: 80_000 });
     }
-    await page.waitForTimeout(4000); // let the NHTSA year bars fill in
+    // Let the NHTSA year checks finish and their results show on the cards.
+    await page.getByText(/Checking NHTSA/).first().waitFor({ state: "detached", timeout: 30_000 }).catch(() => {});
+    await page.waitForTimeout(2500);
     await page.getByRole("button", { name: "End call" }).click();
     await page.waitForTimeout(1500);
   },
