@@ -61,9 +61,10 @@ body {
   color: var(--ink);
 }
 
-.answer h1, .answer h2 { font-weight: 600; margin: 1.1rem 0 0.4rem; }
-/* Section headings in answers read as quiet labels, like a well-made report. */
-.answer h3 {
+.answer h1 { font-weight: 600; margin: 1.1rem 0 0.4rem; }
+/* Section headings in answers read as quiet labels, like a well-made report. The prompts ask for ###,
+   but models sometimes write ## or ####, so all of them get the same look. */
+.answer h2, .answer h3, .answer h4 {
   margin: 1.25rem 0 0.35rem;
   font-size: 11px;
   font-weight: 600;
