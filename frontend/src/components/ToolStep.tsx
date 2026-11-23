@@ -1,4 +1,4 @@
-import { CalendarRange, Check, FileWarning, Globe, Loader2, MessageSquareWarning, ScanLine, ScanSearch, X } from "lucide-react";
+import { CalendarRange, Check, FileWarning, Fuel, Globe, Loader2, MessageSquareWarning, ScanLine, ScanSearch, X } from "lucide-react";
 
 import type { TraceEvent } from "@/lib/agent";
 
@@ -22,6 +22,21 @@ const TOOLS: Record<string, { running: string; done: string; icon: typeof ScanLi
     done: "Complaints",
     icon: MessageSquareWarning,
     summary: (o) => `${Number(o.total ?? 0).toLocaleString()} filed`,
+  },
+  research_picks: {
+    running: "Researching your shortlist",
+    done: "Shortlist data",
+    icon: CalendarRange,
+    summary: (o) => {
+      const picks = (o.picks as { model: string }[] | undefined) ?? [];
+      return `${picks.map((p) => p.model).join(", ")} · years + EPA mpg`;
+    },
+  },
+  get_fuel_economy: {
+    running: "Checking fuel economy",
+    done: "Fuel economy",
+    icon: Fuel,
+    summary: (o) => `${o.year} · ${o.combined_mpg_range} mpg · ${o.annual_fuel_cost_range}/yr`,
   },
   read_link: {
     running: "Reading the link",

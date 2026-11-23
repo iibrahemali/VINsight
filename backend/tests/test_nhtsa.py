@@ -67,7 +67,7 @@ async def test_compare_model_years_keeps_the_12_most_recent_years_of_a_wide_rang
 async def test_mcp_server_exposes_tools_and_readable_errors():
     async with Client(server) as mcp:
         names = {t.name for t in (await mcp.list_tools()).tools}
-        assert names == {"decode_vin", "get_recalls", "get_complaints", "compare_model_years", "analyze_listing", "read_link"}
+        assert names == {"decode_vin", "get_recalls", "get_complaints", "compare_model_years", "analyze_listing", "read_link", "get_fuel_economy", "research_picks"}
 
         ok = await mcp.call_tool("decode_vin", {"vin": VIN})
         assert not ok.is_error and ok.structured_content["model"] == "Accord"

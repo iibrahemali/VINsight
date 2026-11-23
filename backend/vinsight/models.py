@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-SourceType = Literal["nhtsa_vpic", "nhtsa_recall", "nhtsa_complaint", "listing", "link", "corpus", "estimate"]
+SourceType = Literal["nhtsa_vpic", "nhtsa_recall", "nhtsa_complaint", "listing", "link", "epa", "corpus", "estimate"]
 Verdict = Literal["AVOID", "CAUTION", "NONE"]
 
 
@@ -194,3 +194,39 @@ class LinkReading(BaseModel):
     truncated: bool = False
     listing: ListingAnalysis | None = Field(None, description="Red-flag X-ray, when the page is a car listing.")
     source: Source
+
+
+class FuelVariant(BaseModel):
+    model: str = Field(description='EPA\'s model name, e.g. "Civic 4Dr"')
+    engine: str
+    city_mpg: int
+    highway_mpg: int
+    combined_mpg: int
+    annual_fuel_cost: int | None = Field(None, description="EPA's estimated yearly fuel cost in dollars")
+    drive: str | None = None
+
+
+class FuelEconomy(BaseModel):
+    """EPA fuel economy for one model year, across its engine and transmission versions."""
+
+    make: str
+    model: str
+    year: int
+    combined_mpg_range: str
+    annual_fuel_cost_range: str = Field(description="EPA's yearly fuel-cost estimate (its own mileage and fuel-price assumptions)")
+    variants: list[FuelVariant]
+    source: Source
+
+
+class PickResearch(BaseModel):
+    make: str
+    model: str
+    years: ModelYearComparison | None = None
+    fuel: FuelEconomy | None = None
+    errors: list[str] = Field(default_factory=list)
+
+
+class PicksResearch(BaseModel):
+    """Year-by-year complaint data and EPA fuel economy for every model on a shortlist."""
+
+    picks: list[PickResearch]

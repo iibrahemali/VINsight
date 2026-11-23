@@ -4,6 +4,8 @@ Run standalone:  vinsight-mcp            (stdio)
 Inspect:         mcp dev vinsight/mcp_server.py
 """
 
+import asyncio
+import datetime
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -15,9 +17,12 @@ import hashlib
 import re
 import time
 
-from vinsight import attachments, listing
+from vinsight import attachments, fueleconomy, listing
 from vinsight.models import (
     ComplaintsSummary,
+    FuelEconomy,
+    PickResearch,
+    PicksResearch,
     LinkReading,
     ListingAnalysis,
     ModelYearComparison,
@@ -156,6 +161,81 @@ async def analyze_listing(text: str) -> ListingAnalysis:
     Pass the listing text exactly as written.
     """
     return await _xray(text)
+
+
+@server.tool()
+async def get_fuel_economy(make: str, model: str, year: int) -> FuelEconomy:
+    """EPA fuel economy for a model year: city / highway / combined mpg for each engine and
+    transmission, and EPA's estimated yearly fuel cost. Use it to compare running costs.
+    Cite it as [epa:<make>:<model>:<year>].
+    """
+    try:
+        return await fueleconomy.get_fuel_economy(make, model, year)
+    except fueleconomy.FuelEconomyError as e:
+        raise ToolError(str(e)) from e
+
+
+_YEARS_RE = re.compile(r"\s+(\d{4})(?:\s*(?:-|–|to)\s*(\d{4}))?\s*$")
+# Makes whose model names start with the make ("MAZDA3"), so a pick without a separate make still works.
+_MAKE_PREFIXES = ("MAZDA", "MINI")
+
+
+def parse_pick(text: str) -> tuple[str, str, int, int]:
+    """ "HONDA Civic 2014-2018" -> make, model, start and end year. Years are optional: a missing range
+    becomes the last 12 years, a single year becomes that year +/- 3."""
+    text = text.strip()
+    m = _YEARS_RE.search(text)
+    name = text[: m.start()] if m else text
+    words = name.split()
+    if len(words) >= 2:
+        make, model = words[0], " ".join(words[1:])
+    elif words and (prefix := next((p for p in _MAKE_PREFIXES if words[0].upper().startswith(p) and len(words[0]) > len(p)), None)):
+        make, model = prefix, words[0]
+    else:
+        raise ValueError(f'expected "MAKE Model 2014-2018", got "{text}"')
+    if m and m.group(2):
+        start, end = sorted((int(m.group(1)), int(m.group(2))))
+    elif m:
+        start, end = int(m.group(1)) - 3, int(m.group(1)) + 3
+    else:
+        end = datetime.date.today().year - 1
+        start = end - 11
+    return make, model, start, min(end, start + 11)
+
+
+@server.tool()
+async def research_picks(picks: list[str]) -> PicksResearch:
+    """Research a whole shortlist in ONE call. Each pick is a string "MAKE Model start-end" using the
+    recommended years, e.g. ["HONDA Civic 2014-2018", "TOYOTA Corolla 2014-2019"]. For each pick:
+    complaint and recall counts for those years and a few years either side (to spot bad years), and
+    EPA fuel economy for the middle recommended year. Cite years as [years:<make>:<model>:<start>-<end>]
+    and fuel economy as [epa:<make>:<model>:<year>], using the ids in the result.
+    """
+
+    async def one(text: str) -> PickResearch:
+        try:
+            make, model, start, end = parse_pick(text)
+        except ValueError as e:
+            return PickResearch(make="", model=text, errors=[str(e)])
+        out = PickResearch(make=make, model=model)
+        # Widen the comparison a little so a bad year just outside the recommended range shows up.
+        lo, hi = max(start - 2, end - 11), min(end + 2, datetime.date.today().year)
+        years, fuel = await asyncio.gather(
+            compare_model_years(make, model, lo, max(hi, lo), brief=True),
+            fueleconomy.get_fuel_economy(make, model, (start + end) // 2),
+            return_exceptions=True,
+        )
+        if isinstance(years, BaseException):
+            out.errors.append(f"model years: {years}")
+        else:
+            out.years = years
+        if isinstance(fuel, BaseException):
+            out.errors.append(f"fuel economy: {fuel}")
+        else:
+            out.fuel = fuel
+        return out
+
+    return PicksResearch(picks=list(await asyncio.gather(*(one(p) for p in picks[:4]))))
 
 
 _LINK_CACHE: dict[str, tuple[float, LinkReading]] = {}

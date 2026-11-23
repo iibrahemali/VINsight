@@ -164,18 +164,24 @@ export function sourceIds(events: TraceEvent[], attachmentIds: string[] = []): S
       const o = v as Record<string, unknown>;
       if (o.source && typeof o.source === "object") {
         const s = o.source as { type: string; id: string; url?: string };
-        ids.add(`${s.type}:${s.id}`.toLowerCase());
-        if (s.type === "link" && s.url) linkUrls.set(s.id.toLowerCase(), s.url);
+        ids.add(sourceKey(`${s.type}:${s.id}`));
+        // A comparison of 2012-2018 also backs a citation of any range inside it, e.g. 2016-2017.
+        const range = /^(years:.+):(\d{4})-(\d{4})$/.exec(s.id);
+        if (range) {
+          const [lo, hi] = [Number(range[2]), Number(range[3])];
+          for (let a = lo; a <= hi; a++) for (let b = a; b <= hi; b++) ids.add(sourceKey(`${s.type}:${range[1]}:${a}-${b}`));
+        }
+        if ((s.type === "link" || s.type === "epa") && s.url) linkUrls.set(`${s.type}:${s.id}`.toLowerCase(), s.url);
       }
       // Year comparisons list recall campaigns without a source object each.
       if (Array.isArray(o.recall_campaigns)) {
-        o.recall_campaigns.forEach((c) => ids.add(`nhtsa_recall:${c}`.toLowerCase()));
+        o.recall_campaigns.forEach((c) => ids.add(sourceKey(`nhtsa_recall:${c}`)));
       }
       // A year comparison carries each year's complaint total, so [complaints:make:model:year] for any
       // year in it is backed by tool data too.
       if (Array.isArray(o.years) && typeof o.make === "string" && typeof o.model === "string") {
         for (const y of o.years as { year?: number }[]) {
-          if (y?.year) ids.add(`nhtsa_complaint:complaints:${o.make}:${o.model}:${y.year}`.toLowerCase());
+          if (y?.year) ids.add(sourceKey(`nhtsa_complaint:complaints:${o.make}:${o.model}:${y.year}`));
         }
       }
       Object.values(o).forEach(walk);
@@ -193,19 +199,26 @@ const CITE_TYPES: Record<string, string> = {
   years: "nhtsa_complaint",
   doc: "doc",
   link: "link",
+  epa: "epa",
 };
 
 export function citationKey(kind: string, id: string): string {
   // [complaints:honda:accord:2003] maps to the summary source id "complaints:honda:accord:2003".
   const sourceId = kind === "complaints" || kind === "years" ? `${kind}:${id}` : id;
-  return `${CITE_TYPES[kind] ?? kind}:${sourceId}`.toLowerCase();
+  return sourceKey(`${CITE_TYPES[kind] ?? kind}:${sourceId}`);
 }
 
-// read_link results map their short id to the page URL, so [link:id] chips can open the page.
+// Case and spaces don't count: a tool called with "Mazda 3" and a citation of "mazda3" match.
+function sourceKey(key: string): string {
+  return key.toLowerCase().replace(/\s+/g, "");
+}
+
+// Sources whose URL can't be rebuilt from the id (web pages, EPA results) remember it here, so their
+// citations can open the page.
 const linkUrls = new Map<string, string>();
 
 export function citationUrl(kind: string, id: string): string | undefined {
-  if (kind === "link") return linkUrls.get(id.toLowerCase());
+  if (kind === "link" || kind === "epa") return linkUrls.get(`${kind}:${id}`.toLowerCase());
   if (kind === "recall") return `https://www.nhtsa.gov/recalls?nhtsaId=${id}`;
   if (kind === "vpic") return `https://vpic.nhtsa.dot.gov/decoder/Decoder?VIN=${id}`;
   if (kind === "complaints" || kind === "years") {
@@ -219,7 +232,7 @@ export function citationUrl(kind: string, id: string): string | undefined {
 // Turn "[recall:19V182000]" into a markdown link with a cite: scheme the renderer styles as a chip.
 // Models vary the format, so also accept spaces inside the brackets and several citations in one
 // bracket: "[ recall:19V182000, recall:19V499000 ]" becomes two chips.
-const CITE_KINDS = "vpic|recalls?|complaints?|years|doc|link";
+const CITE_KINDS = "vpic|recalls?|complaints?|years|doc|link|epa";
 const CITE_GROUP = new RegExp(`\\[\\s*((?:(?:${CITE_KINDS}):[^\\],;\\n]+?\\s*[,;]?\\s*)+)\\]`, "gi");
 const CITE_ONE = new RegExp(`(${CITE_KINDS}):([^\\]),;\\n]+)`, "i");
 // Some models write "(source: years:honda:civic:2016-2020)" instead of brackets.

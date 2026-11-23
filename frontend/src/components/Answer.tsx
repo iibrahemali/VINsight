@@ -22,8 +22,10 @@ function describe(kind: string, id: string): string {
       return `Owner complaints · ${title(parts.slice(0, -1).join(" ").toLowerCase())} ${parts.at(-1)}`;
     case "years":
       return `Complaints by year · ${title(parts.slice(0, -1).join(" ").toLowerCase())} ${parts.at(-1)}`;
+    case "epa":
+      return `EPA fuel economy · ${title(parts.slice(0, -1).join(" ").toLowerCase())} ${parts.at(-1)}`;
     case "doc":
-      return "Attached listing";
+      return "Your attachment (file or page)";
     case "link":
       return "Web page";
     default:
