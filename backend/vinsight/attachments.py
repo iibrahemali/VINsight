@@ -25,7 +25,8 @@ MAX_FETCH_BYTES = 5_000_000
 MAX_TEXT_CHARS = 12_000  # per attachment, as stored
 PROMPT_CHARS = 6_000  # per attachment, as sent to the model (Groq's free tier is ~8K tokens/minute)
 # An honest bot UA: sites that allow bots can, and the ones that block bots are told the truth.
-USER_AGENT = "VINsightBot/0.1 (used-car research assistant; reads one page a user shared)"
+# Wikimedia and others reject bot UAs without a contact URL.
+USER_AGENT = "VINsightBot/0.1 (+https://github.com/iibrahemali/VINsight; used-car research assistant; reads one page a user shared)"
 
 
 class AttachmentError(ValueError):
